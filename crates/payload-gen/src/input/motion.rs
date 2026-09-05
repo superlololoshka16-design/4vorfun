@@ -1,7 +1,7 @@
-use crate::event::{RawEvent, button, input};
-use crate::perlin::Perlin2D;
-use crate::persona::Persona;
-use crate::prng::SplitMix64Rng;
+use crate::input::event::{RawEvent, button, input};
+use crate::input::perlin::Perlin2D;
+use crate::input::persona::Persona;
+use crate::input::prng::SplitMix64Rng;
 
 const OVERSHOOT_MIN_PX: f64 = 200.0;
 const ARRIVE_EPS_PX: f64 = 0.75;

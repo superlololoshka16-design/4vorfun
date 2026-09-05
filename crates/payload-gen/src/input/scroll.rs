@@ -1,6 +1,84 @@
-use crate::event::{RawEvent, input};
-use crate::persona::Persona;
-use crate::prng::SplitMix64Rng;
+use crate::input::event::{RawEvent, input};
+use crate::input::persona::Persona;
+use crate::input::prng::SplitMix64Rng;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScrollMethod {
+    WheelNotch,
+    Trackpad,
+    Keyboard,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ScrollStep {
+    pub dy_px: i32,
+    pub dt_ms: u32,
+}
+
+#[derive(Debug, Clone)]
+pub struct ScrollPath {
+    pub steps: Vec<ScrollStep>,
+}
+
+impl ScrollPath {
+    pub fn total_px(&self) -> i32 {
+        self.steps.iter().map(|s| s.dy_px).sum()
+    }
+
+    pub fn duration_ms(&self) -> u32 {
+        self.steps.iter().map(|s| s.dt_ms).sum()
+    }
+}
+
+#[inline]
+pub fn chunk_size_px(persona: &Persona, rng: &mut SplitMix64Rng) -> i32 {
+    let notches = 1 + rng.next_u64() % 3;
+    (persona.notch_px * notches as f64) as i32
+}
+
+#[inline]
+pub fn reading_scroll_duration_ms(rng: &mut SplitMix64Rng) -> u32 {
+    rng.lognormal_ms(420.0, 0.35)
+}
+
+#[inline]
+pub fn scroll_velocity_px_s(persona: &Persona, velocity_px_per_frame: f64) -> f64 {
+    velocity_px_per_frame * 60.0 / persona.notch_friction
+}
+
+#[inline]
+pub fn should_overscroll(persona: &Persona, rng: &mut SplitMix64Rng) -> bool {
+    rng.chance(persona.overscroll_p)
+}
+
+#[inline]
+pub fn should_overshoot(persona: &Persona, rng: &mut SplitMix64Rng) -> bool {
+    rng.chance(persona.overscroll_p * 0.6)
+}
+
+pub fn generate_scroll_path(
+    persona: Persona,
+    total_px: f64,
+    seed: u64,
+    trust: i32,
+) -> ScrollPath {
+    let mut cur = ScrollCursor::new(persona, total_px, 0, seed, trust);
+    let mut steps = Vec::new();
+    let mut now = 0u64;
+    let mut last_y = 0i32;
+    while !cur.done() && now < 60_000_000 {
+        if let Some(ev) = cur.step(now) {
+            let y = ev.y as i32;
+            steps.push(ScrollStep {
+                dy_px: y - last_y,
+                dt_ms: ev.dt_ms as u32,
+            });
+            last_y = y;
+        }
+        now = cur.next_due_us().max(now + 1);
+    }
+    ScrollPath { steps }
+}
 
 pub struct ScrollCursor {
     persona: Persona,

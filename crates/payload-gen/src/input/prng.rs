@@ -25,6 +25,11 @@ impl SplitMix64Rng {
     }
 
     #[inline]
+    pub fn next_u32(&mut self) -> u32 {
+        self.next_u64() as u32
+    }
+
+    #[inline]
     pub fn next_f64(&mut self) -> f64 {
         ((self.next_u64() >> 11) as f64) * (1.0 / 9007199254740992.0)
     }

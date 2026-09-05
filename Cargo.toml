@@ -2,7 +2,6 @@
 resolver = "3"
 members = [
     "crates/core-utils",
-    "crates/human-input",
     "crates/session-state",
     "crates/payload-gen",
     "crates/net-client",

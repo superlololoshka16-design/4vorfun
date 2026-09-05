@@ -85,6 +85,7 @@ pub struct Collector {
     challenge: Option<Bytes>,
     pub challenge_markers: SmallVec<[(CompactString, crate::types::ChallengeType); 4]>,
     pub challenge_script_url: Option<CompactString>,
+    pub telemetry_route: Option<crate::telemetry::TelemetryRoute>,
     extract_keys: Vec<CompactString>,
     extracted_ids: std::collections::BTreeMap<u32, CompactString>,
     next_data: Option<NextData>,
@@ -111,6 +112,7 @@ impl Collector {
             script_srcs: SmallVec::new(),
             inline_count: 0,
             challenge: None,
+            telemetry_route: None,
             challenge_markers: SmallVec::new(),
             challenge_script_url: None,
             extract_keys,
@@ -157,6 +159,12 @@ impl Collector {
         self.title_open = false;
         self.finalize_script();
         self.finalize_form();
+        if self.telemetry_route.is_none() {
+            let srcs: Vec<&str> = self.script_srcs.iter().map(|s| s.as_str()).collect();
+            let action = self.forms.first().and_then(|f| f.action.as_deref());
+            let inline = self.challenge.as_deref().unwrap_or(&[]);
+            self.telemetry_route = crate::telemetry::detect_route(&srcs, inline, action).ok();
+        }
     }
 
     #[inline]
@@ -422,6 +430,7 @@ impl Collector {
             challenge: self.challenge,
             challenge_markers: self.challenge_markers,
             challenge_script_url: self.challenge_script_url,
+            telemetry_route: self.telemetry_route,
             extracted,
             next_data: self.next_data,
             dom: self.dom,

@@ -1,5 +1,6 @@
 mod canvas;
 mod digest;
+pub mod input;
 mod profiles;
 mod rng;
 mod timing;
@@ -9,3 +10,5 @@ pub use digest::{PowSolution, md5_hex_into, pow_search, sha256_hex_into, sha256_
 pub use profiles::{asn_info, pick_profile};
 pub use rng::Rng;
 pub use timing::{jitter_ratio, pace_delay};
+
+pub use input::*;

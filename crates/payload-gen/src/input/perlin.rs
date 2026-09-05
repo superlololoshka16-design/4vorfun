@@ -1,4 +1,4 @@
-use crate::prng::SplitMix64Rng;
+use crate::input::prng::SplitMix64Rng;
 
 pub struct Perlin2D {
     perm: [u8; 512],

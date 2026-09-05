@@ -1,4 +1,4 @@
-use human_input::{
+use payload_gen::input::{
     Calibration, ClickCursor, InputHub, MotionCursor, Persona, RawEvent, ScrollCursor,
     TabInput, TypingCursor, events_bytes,
 };
@@ -133,10 +133,10 @@ fn click_dwell_is_lognormal_band() {
         let mut release_t = 0u64;
         while !cur.done() && now < 5_000_000 {
             if let Some(ev) = cur.step(now) {
-                if ev.kind == human_input::input::PRESS {
+                if ev.kind == payload_gen::input::input::PRESS {
                     press_t = now;
                 }
-                if ev.kind == human_input::input::RELEASE {
+                if ev.kind == payload_gen::input::input::RELEASE {
                     release_t = now;
                 }
             }
@@ -183,7 +183,7 @@ fn scroll_decays_and_lands() {
 
 #[test]
 fn raw_event_is_packed_pod() {
-    assert_eq!(human_input::RAW_EVENT_LEN, 8);
+    assert_eq!(payload_gen::input::RAW_EVENT_LEN, 8);
     let events = [
         RawEvent::new(11, 22, 33, 4, 5),
         RawEvent::new(66, 77, 88, 1, 2),

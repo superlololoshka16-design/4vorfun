@@ -1,6 +1,82 @@
-use crate::event::{RawEvent, button, input};
-use crate::persona::Persona;
-use crate::prng::SplitMix64Rng;
+use crate::input::event::{RawEvent, button, input};
+use crate::input::persona::Persona;
+use crate::input::prng::SplitMix64Rng;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClickButton {
+    Primary,
+    Secondary,
+    Auxiliary,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ClickAuthenticityProfile {
+    pub dblclick_max_ms: u32,
+    pub min_press_ms: u32,
+    pub max_press_ms: u32,
+    pub min_release_gap_ms: u32,
+    pub max_release_gap_ms: u32,
+}
+
+impl Default for ClickAuthenticityProfile {
+    fn default() -> Self {
+        Self {
+            dblclick_max_ms: 500,
+            min_press_ms: 60,
+            max_press_ms: 160,
+            min_release_gap_ms: 40,
+            max_release_gap_ms: 220,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ClickEvent {
+    pub button: ClickButton,
+    pub press_ms: u32,
+    pub release_ms: u32,
+    pub ts_unix_ms: u64,
+}
+
+impl ClickEvent {
+    pub fn is_plausible(&self, profile: &ClickAuthenticityProfile) -> bool {
+        self.press_ms >= profile.min_press_ms
+            && self.press_ms <= profile.max_press_ms
+            && self.release_ms >= profile.min_release_gap_ms
+            && self.release_ms <= profile.max_release_gap_ms
+    }
+
+    pub fn forms_dblclick_with(&self, other: &ClickEvent) -> bool {
+        if self.button != other.button {
+            return false;
+        }
+        if other.ts_unix_ms < self.ts_unix_ms {
+            return false;
+        }
+        let delta = other.ts_unix_ms.saturating_sub(self.ts_unix_ms);
+        delta <= 500
+    }
+}
+
+pub fn generate_click_timing(
+    prng: &mut SplitMix64Rng,
+    profile: &ClickAuthenticityProfile,
+    button: ClickButton,
+    ts_unix_ms: u64,
+) -> ClickEvent {
+    let press_ms = prng
+        .lognormal_ms(95.0, 0.2)
+        .clamp(profile.min_press_ms, profile.max_press_ms);
+    let release_ms = prng
+        .lognormal_ms(110.0, 0.3)
+        .clamp(profile.min_release_gap_ms, profile.max_release_gap_ms);
+    ClickEvent {
+        button,
+        press_ms,
+        release_ms,
+        ts_unix_ms,
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct ClickPlan {

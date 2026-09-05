@@ -32,6 +32,38 @@ fn feed_chunks(p: &mut StreamPipeline, html: &[u8], n: usize) {
 }
 
 #[test]
+fn telemetry_route_detected_from_page_surface() {
+    let turnstile = parser_pipeline::detect_route(
+        &["https://challenges.cloudflare.com/turnstile/v0/api.js"],
+        &[],
+        None,
+    )
+    .expect("turnstile route");
+    assert_eq!(turnstile.provider, parser_pipeline::TelemetryProvider::Turnstile);
+    assert_eq!(turnstile.transport, parser_pipeline::Transport::CdnPost);
+
+    let datadome = parser_pipeline::detect_route(
+        &["https://js.datadome.co/tags.js"],
+        &[],
+        None,
+    )
+    .expect("datadome route");
+    assert_eq!(datadome.provider, parser_pipeline::TelemetryProvider::DataDome);
+    assert_eq!(datadome.field.as_str(), "datadome");
+
+    let inhouse = parser_pipeline::detect_route(
+        &[],
+        b"fetch('/telemetry', {method:'POST'})",
+        Some("https://gate.local/submit"),
+    )
+    .expect("in-house route");
+    assert_eq!(inhouse.provider, parser_pipeline::TelemetryProvider::InHouse);
+    assert!(inhouse.endpoint.as_str().starts_with("https://"));
+
+    assert!(parser_pipeline::detect_route(&["/static/app.js"], b"console.log(1)", None).is_err());
+}
+
+#[test]
 fn whole_page_single_pass() {
     let mut p = StreamPipeline::new(Default::default());
     feed_chunks(&mut p, PAGE.as_bytes(), 1);

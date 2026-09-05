@@ -1,9 +1,0 @@
-[package]
-name = "human-input"
-version.workspace = true
-edition.workspace = true
-rust-version.workspace = true
-
-[dependencies]
-bytemuck = { workspace = true }
-smallvec = { workspace = true }

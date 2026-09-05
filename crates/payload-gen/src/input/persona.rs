@@ -1,4 +1,4 @@
-use crate::prng::SplitMix64Rng;
+use crate::input::prng::SplitMix64Rng;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Persona {

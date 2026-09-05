@@ -19,6 +19,8 @@ pub enum NetError {
     Status(u16),
     #[error("pipe: {0}")]
     Pipe(#[from] parser_pipeline::PipeError),
+    #[error("bad telemetry payload")]
+    Payload,
 }
 
 pub struct Fetched {
@@ -36,6 +38,45 @@ fn cookie_header(jar: &session_state::CookieJar) -> Option<HeaderValue> {
         return None;
     }
     HeaderValue::from_bytes(&buf).ok()
+}
+
+pub async fn push_telemetry(
+    engines: &EngineSet,
+    slot: usize,
+    session: &mut Session,
+    route: &parser_pipeline::TelemetryRoute,
+    blob: &[u8],
+) -> Result<u16, NetError> {
+    let client = engines.client_for(slot);
+    let mut req = match route.transport {
+        parser_pipeline::Transport::FormField => {
+            let value = core_utils::base64::STANDARD.encode_to_string(blob);
+            client.post(route.endpoint.as_str()).form(&[(route.field.as_str(), value)])
+        }
+        parser_pipeline::Transport::CustomHeader => {
+            let name = HeaderName::from_bytes(route.field.as_bytes()).map_err(|_| NetError::Payload)?;
+            let value = HeaderValue::from_bytes(blob).map_err(|_| NetError::Payload)?;
+            client.post(route.endpoint.as_str()).header(name, value)
+        }
+        parser_pipeline::Transport::CdnPost => client
+            .post(route.endpoint.as_str())
+            .header(wreq::header::CONTENT_TYPE, "application/octet-stream")
+            .body(blob.to_vec()),
+    };
+    if let Some(cv) = cookie_header(&session.jar) {
+        let mut hm = HeaderMap::with_capacity(1);
+        hm.insert(HeaderName::from_static("cookie"), cv);
+        req = req.headers(hm);
+    }
+    let resp = req.send().await?;
+    let status = resp.status().as_u16();
+    for v in resp.headers().get_all(SET_COOKIE).iter() {
+        if let Ok(line) = v.to_str() {
+            session.jar.ingest(line);
+        }
+    }
+    session.touch();
+    Ok(status)
 }
 
 pub async fn fetch_page(

@@ -1,5 +1,5 @@
 use crate::click::ClickCursor;
-use crate::event::RawEvent;
+use crate::input::event::RawEvent;
 use crate::motion::MotionCursor;
 use crate::scroll::ScrollCursor;
 use crate::typing::TypingCursor;

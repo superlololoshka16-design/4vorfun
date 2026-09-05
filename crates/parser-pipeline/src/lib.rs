@@ -5,12 +5,14 @@ mod nextdata;
 mod pipeline;
 mod probe;
 mod scratch;
+mod telemetry;
 mod types;
 
 pub use b64::{B64Error, decode_b64_field};
 pub use collector::{floor_char_boundary, looks_like_token};
 pub use dom::{DomTree, NodeId, ATTR_NAMES};
 pub use pipeline::{Flow, Limits, PipeError, StreamPipeline};
+pub use telemetry::{RouteError, TelemetryProvider, TelemetryRoute, Transport, detect_route};
 pub use types::{ChallengeType, FieldData, FieldKind, Form, FormData, NextData, PageData};
 
 use compact_str::CompactString;

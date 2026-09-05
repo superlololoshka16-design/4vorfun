@@ -84,6 +84,7 @@ pub struct PageData {
     pub challenge: Option<Bytes>,
     pub challenge_markers: SmallVec<[(CompactString, ChallengeType); 4]>,
     pub challenge_script_url: Option<CompactString>,
+    pub telemetry_route: Option<crate::telemetry::TelemetryRoute>,
     pub dom: DomTree,
     pub extracted: std::collections::BTreeMap<CompactString, CompactString>,
     pub next_data: Option<NextData>,

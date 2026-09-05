@@ -114,14 +114,19 @@ static PATTERNS: &[RoutePattern] = &[
     },
 ];
 
-static INLINE_HINTS: &[&[u8]] = &[
-    b"\"/telemetry\"",
-    b"'/telemetry'",
-    b"/collect?v=",
-    b"\"/api/telemetry\"",
-    b"'/api/telemetry'",
-    b"\"/beacon\"",
-    b"sendBeacon(",
+struct InlineHint {
+    needle: &'static [u8],
+    path: &'static str,
+}
+
+static INLINE_HINTS: &[InlineHint] = &[
+    InlineHint { needle: b"\"/telemetry\"", path: "/telemetry" },
+    InlineHint { needle: b"'/telemetry'", path: "/telemetry" },
+    InlineHint { needle: b"/collect?v=", path: "/collect" },
+    InlineHint { needle: b"\"/api/telemetry\"", path: "/api/telemetry" },
+    InlineHint { needle: b"'/api/telemetry'", path: "/api/telemetry" },
+    InlineHint { needle: b"\"/beacon\"", path: "/beacon" },
+    InlineHint { needle: b"sendBeacon(", path: "/beacon" },
 ];
 
 static AC: LazyLock<AhoCorasick> = LazyLock::new(|| {
@@ -133,9 +138,10 @@ static AC: LazyLock<AhoCorasick> = LazyLock::new(|| {
 });
 
 static INLINE_AC: LazyLock<AhoCorasick> = LazyLock::new(|| {
+    let needles: Vec<&[u8]> = INLINE_HINTS.iter().map(|h| h.needle).collect();
     AhoCorasick::builder()
         .match_kind(aho_corasick::MatchKind::LeftmostFirst)
-        .build(INLINE_HINTS)
+        .build(needles)
         .expect("inline telemetry hints")
 });
 
@@ -151,22 +157,17 @@ pub fn detect_route(scripts: &[&str], inline: &[u8], form_action: Option<&str>) 
             });
         }
     }
-    if !inline.is_empty() && INLINE_AC.is_match(inline) {
-        let origin = form_action
-            .and_then(|a| a.split_once("://").map(|(_, rest)| rest))
-            .and_then(|rest| rest.find('/').map(|i| &rest[..i]))
-            .unwrap_or("challenge.local");
-        let endpoint = if form_action.is_some_and(|a| a.starts_with("https://")) {
-            CompactString::new(form_action.unwrap_or(""))
-        } else {
-            CompactString::from(format!("https://{origin}/telemetry"))
-        };
-        return Ok(TelemetryRoute {
-            provider: TelemetryProvider::InHouse,
-            endpoint,
-            transport: Transport::CdnPost,
-            field: CompactString::const_new("telemetry"),
-        });
+    if !inline.is_empty() {
+        if let Some(mat) = INLINE_AC.find(inline) {
+            let hint = &INLINE_HINTS[mat.pattern().as_usize()];
+            return Ok(TelemetryRoute {
+                provider: TelemetryProvider::InHouse,
+                endpoint: CompactString::const_new(hint.path),
+                transport: Transport::CdnPost,
+                field: CompactString::const_new("telemetry"),
+            });
+        }
     }
+    let _ = form_action;
     Err(RouteError::NotFound)
 }

@@ -47,6 +47,16 @@
     var B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     globalThis.history = { length: 1, state: null, pushState: function () { }, replaceState: function () { }, back: function () { }, forward: function () { } };
     globalThis.setTimeout = function (fn) { if (typeof fn === "function") { try { fn(); } catch (e) { } } return 0; };
+    globalThis.fetch = function () {
+        return {
+            ok: true,
+            status: 204,
+            json: function () { return {}; },
+            text: function () { return ""; },
+            then: function () { return this; },
+            catch: function () { return this; }
+        };
+    };
     globalThis.setInterval = function (fn) { if (typeof fn === "function") { try { fn(); } catch (e) { } } return 0; };
     globalThis.clearTimeout = function () { };
     globalThis.clearInterval = function () { };

@@ -8,6 +8,7 @@ pub mod perlin;
 pub mod persona;
 pub mod prng;
 pub mod scheduler;
+pub mod session;
 pub mod scroll;
 pub mod trajectory;
 pub mod typing;
@@ -40,6 +41,9 @@ pub use perlin::Perlin2D;
 pub use persona::{Persona, ThrottledPersona};
 pub use prng::SplitMix64Rng;
 pub use scheduler::{Calibration, InputHub, TabId, TabInput};
+pub use session::{
+    BATCH_CAP, BATCH_INTERVAL_US, TabPhase, TabSession, TabTick, TelemetryBatcher,
+};
 pub use scroll::{
     ScrollCursor, ScrollMethod, ScrollPath, ScrollStep, chunk_size_px, generate_scroll_path,
     reading_scroll_duration_ms, scroll_velocity_px_s, should_overscroll, should_overshoot,

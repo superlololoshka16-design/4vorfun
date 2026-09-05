@@ -58,7 +58,7 @@ fn telemetry_route_detected_from_page_surface() {
     )
     .expect("in-house route");
     assert_eq!(inhouse.provider, parser_pipeline::TelemetryProvider::InHouse);
-    assert!(inhouse.endpoint.as_str().starts_with("https://"));
+    assert_eq!(inhouse.endpoint.as_str(), "/telemetry");
 
     assert!(parser_pipeline::detect_route(&["/static/app.js"], b"console.log(1)", None).is_err());
 }

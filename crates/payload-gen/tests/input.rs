@@ -29,6 +29,42 @@ fn run_motion(seed: u64, trust: i32) -> (Vec<RawEvent>, bool) {
 }
 
 #[test]
+fn tab_session_runs_full_lifecycle_into_idle() {
+    let persona = Persona::derive(0x1FEE, 11);
+    let mut tab = payload_gen::input::TabSession::start(
+        persona,
+        0x1FEE,
+        11,
+        (120.0, 90.0),
+        (600.0, 400.0),
+        30.0,
+        Some("hello gate".to_string()),
+        0,
+        0,
+    );
+    let mut seen = std::collections::HashSet::new();
+    let mut events = 0u64;
+    let mut now = 0u64;
+    let mut idle_events = 0u64;
+    while now < 120_000_000 {
+        let tick = tab.advance(now);
+        now = tick.next_due_us.max(now + 1);
+        seen.insert(tick.phase);
+        events += tick.events.len() as u64;
+        if tick.phase == payload_gen::input::TabPhase::Idle {
+            idle_events += tick.events.len() as u64;
+        }
+    }
+    assert!(seen.contains(&payload_gen::input::TabPhase::Approach));
+    assert!(seen.contains(&payload_gen::input::TabPhase::Click));
+    assert!(seen.contains(&payload_gen::input::TabPhase::Typing));
+    assert!(seen.contains(&payload_gen::input::TabPhase::Reading));
+    assert!(seen.contains(&payload_gen::input::TabPhase::Idle));
+    assert!(events > 30, "жизнь вкладки не бывает 5 точками: {events}");
+    assert!(idle_events > 0, "идл обязан слать логику, а не молчать");
+}
+
+#[test]
 fn motion_reaches_target_with_variable_timing() {
     let (events, on) = run_motion(0x5EED_0001, 0);
     assert!(on, "движение обязано закончиться в цели");

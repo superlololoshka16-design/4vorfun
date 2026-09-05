@@ -7,9 +7,12 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use net_client::{EngineSet, Fetched, fetch_page_sel, reslot};
+use net_client::{EngineSet, Fetched, fetch_page_sel, push_telemetry, reslot};
 use parser_pipeline::{StreamPipeline, validate_selectors};
 use core_utils::xxh3;
+use payload_gen::input::{
+    Persona, RawEvent, TabSession, TelemetryBatcher, BATCH_CAP, BATCH_INTERVAL_US, events_bytes,
+};
 use runtime_exec::{ExecReq, ProfileSnap, WorkerPool};
 use scc::HashMap;
 use serde::{Deserialize, Serialize};
@@ -272,12 +275,96 @@ async fn fetch_json(st: &AppState, url: &str, selectors: &[(String, String)]) ->
     if let Some(tok) = solve_challenge(st, &mut session, &f).await {
         v["solvedToken"] = serde_json::Value::String(tok.to_string());
     }
+    if let Some(route) = f.page.telemetry_route.clone() {
+        let flow = telemetry_flow(st, slot, &mut session, &route).await;
+        v["telemetry"] = flow;
+    }
     if let (Some(url), Some(script)) = (&f.page.challenge_script_url, &f.page.challenge) {
         if st.monitor.check(url.as_str(), script) {
             tracing::warn!(url = url.as_str(), "challenge build changed");
         }
     }
     Ok(v)
+}
+
+const TELEMETRY_WINDOW_US: u64 = 25_000_000;
+const TELEMETRY_MAX_TICKS: u32 = 4_000;
+
+async fn telemetry_flow(
+    st: &AppState,
+    slot: usize,
+    session: &mut Session,
+    route: &parser_pipeline::TelemetryRoute,
+) -> serde_json::value::Value {
+    let persona = Persona::derive(session.profile.canvas_seed, session.id.as_raw());
+    let mut rng = payload_gen::input::SplitMix64Rng::new(session.profile.canvas_seed ^ 0x5E55_0000_0000_0111);
+    let vw = session.profile.screen_w.max(320) as f64;
+    let vh = session.profile.screen_h.max(240) as f64;
+    let from = (vw * (0.08 + rng.next_f64() * 0.1), vh * (0.1 + rng.next_f64() * 0.12));
+    let target = (vw * (0.45 + rng.next_f64() * 0.25), vh * (0.4 + rng.next_f64() * 0.25));
+    let mut tab = TabSession::start(persona, session.profile.canvas_seed, session.id.as_raw(), from, target, 30.0, None, 0, 0);
+    let mut batcher = TelemetryBatcher::new(BATCH_CAP, BATCH_INTERVAL_US);
+    let mut scratch: Vec<RawEvent> = Vec::with_capacity(BATCH_CAP + 32);
+    let mut now = 0u64;
+    let mut ticks = 0u32;
+    let mut batches = 0u32;
+    let mut events_total = 0u64;
+    let mut statuses: Vec<u16> = Vec::new();
+    batcher.begin(0);
+    while now < TELEMETRY_WINDOW_US && ticks < TELEMETRY_MAX_TICKS {
+        let tick = tab.advance(now);
+        now = tick.next_due_us.max(now + 1);
+        ticks += 1;
+        if tick.events.is_empty() {
+            if batcher.ready(now) && !scratch.is_empty() {
+                batches += 1;
+                let status = push_telemetry(&st.engines, slot, session, route, events_bytes(&scratch))
+                    .await
+                    .map(|s| s)
+                    .unwrap_or(0);
+                st.stats.add_touches(scratch.len() as u64);
+                statuses.push(status);
+                scratch.clear();
+                batcher.begin(now);
+            }
+            if tab.finished() {
+                break;
+            }
+            continue;
+        }
+        batcher.feed(tick.events.len());
+        events_total += tick.events.len() as u64;
+        scratch.extend_from_slice(&tick.events);
+        if batcher.ready(now) {
+            batches += 1;
+            let status = push_telemetry(&st.engines, slot, session, route, events_bytes(&scratch))
+                .await
+                .map(|s| s)
+                .unwrap_or(0);
+            st.stats.add_touches(scratch.len() as u64);
+            statuses.push(status);
+            scratch.clear();
+            batcher.begin(now);
+        }
+    }
+    if !scratch.is_empty() {
+        batches += 1;
+        let status = push_telemetry(&st.engines, slot, session, route, events_bytes(&scratch))
+            .await
+            .map(|s| s)
+            .unwrap_or(0);
+        st.stats.add_touches(scratch.len() as u64);
+        statuses.push(status);
+    }
+    serde_json::json!({
+        "provider": route.provider.as_str(),
+        "endpoint": route.endpoint.as_str(),
+        "transport": format!("{:?}", route.transport),
+        "batches": batches,
+        "events": events_total,
+        "statuses": statuses,
+        "lastPhase": format!("{:?}", tab.phase()),
+    })
 }
 
 fn page_json(f: &Fetched) -> serde_json::value::Value {

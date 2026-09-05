@@ -48,18 +48,19 @@ pub async fn push_telemetry(
     blob: &[u8],
 ) -> Result<u16, NetError> {
     let client = engines.client_for(slot);
+    let endpoint = resolve_endpoint(&session.origin, route.endpoint.as_str());
     let mut req = match route.transport {
         parser_pipeline::Transport::FormField => {
             let value = core_utils::base64::STANDARD.encode_to_string(blob);
-            client.post(route.endpoint.as_str()).form(&[(route.field.as_str(), value)])
+            client.post(endpoint.as_str()).form(&[(route.field.as_str(), value)])
         }
         parser_pipeline::Transport::CustomHeader => {
             let name = HeaderName::from_bytes(route.field.as_bytes()).map_err(|_| NetError::Payload)?;
             let value = HeaderValue::from_bytes(blob).map_err(|_| NetError::Payload)?;
-            client.post(route.endpoint.as_str()).header(name, value)
+            client.post(endpoint.as_str()).header(name, value)
         }
         parser_pipeline::Transport::CdnPost => client
-            .post(route.endpoint.as_str())
+            .post(endpoint.as_str())
             .header(wreq::header::CONTENT_TYPE, "application/octet-stream")
             .body(blob.to_vec()),
     };
@@ -77,6 +78,21 @@ pub async fn push_telemetry(
     }
     session.touch();
     Ok(status)
+}
+
+fn resolve_endpoint(origin: &str, endpoint: &str) -> CompactString {
+    if endpoint.starts_with("http://") || endpoint.starts_with("https://") {
+        return CompactString::new(endpoint);
+    }
+    let base = match origin.find("://") {
+        Some(s) => {
+            let after = &origin[s + 3..];
+            let cut = after.find('/').map(|i| s + 3 + i).unwrap_or(origin.len());
+            &origin[..cut]
+        }
+        None => origin,
+    };
+    CompactString::from(format!("{base}{endpoint}"))
 }
 
 pub async fn fetch_page(

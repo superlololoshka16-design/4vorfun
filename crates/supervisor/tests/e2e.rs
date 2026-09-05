@@ -23,14 +23,27 @@ var entropy = [3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5, 8, 9, 7, 9, 3, 2, 3, 8, 4, 6, 2,
 var acc = 0;
 for (var i = 0; i < 32; i++) { acc += entropy[i] * (i + 2); acc = acc ^ (acc << 2); acc = acc >>> 1; }
 eval("1"); atob("YQ=="); setTimeout(function(){}, 1);
+fetch("/telemetry", {method: "POST"});
 String.fromCharCode(75), "gate".charCodeAt(0);
 __silo_sha256("gate:" + _pQ7 + ":" + _rT9 + ":" + acc);
 </script>
 </body></html>"#;
 
-async fn mock_gate(listener: TcpListener) {
-    for _round in 0..2 {
-        let (mut sock, _) = listener.accept().await.expect("client");
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::Arc as StdArc;
+
+#[derive(Clone, Default)]
+struct TelemetryStats {
+    batches: StdArc<AtomicU32>,
+    bytes: StdArc<AtomicU64>,
+}
+
+async fn mock_gate(listener: TcpListener, stats: TelemetryStats) {
+    loop {
+        let (mut sock, _) = match tokio::time::timeout(Duration::from_millis(750), listener.accept()).await {
+            Ok(Ok(conn)) => conn,
+            _ => break,
+        };
         let mut buf = vec![0u8; 8192];
         let mut raw = Vec::new();
         loop {
@@ -56,8 +69,20 @@ async fn mock_gate(listener: TcpListener) {
                 }
             }
         }
-        if raw.starts_with(b"POST") {
-            let head_end = raw.windows(4).position(|w| w == b"\r\n\r\n").expect("head");
+        let head_end = raw.windows(4).position(|w| w == b"\r\n\r\n");
+        let path = head_end
+            .map(|h| String::from_utf8_lossy(&raw[..h]).to_string())
+            .and_then(|head| head.split_whitespace().nth(1).map(str::to_string))
+            .unwrap_or_default();
+        if raw.starts_with(b"POST") && path.starts_with("/telemetry") {
+            let head_end = head_end.expect("head");
+            let body = &raw[head_end + 4..];
+            stats.batches.fetch_add(1, Ordering::Relaxed);
+            stats.bytes.fetch_add(body.len() as u64, Ordering::Relaxed);
+            let resp = "HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+            sock.write_all(resp.as_bytes()).await.expect("write telemetry");
+        } else if raw.starts_with(b"POST") {
+            let head_end = head_end.expect("head");
             let body = &raw[head_end + 4..];
             let text = String::from_utf8_lossy(body);
             let head = String::from_utf8_lossy(&raw[..head_end]).to_uppercase();
@@ -73,10 +98,11 @@ async fn mock_gate(listener: TcpListener) {
             sock.write_all(resp.as_bytes()).await.expect("write post");
         } else {
             let resp = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nSet-Cookie: SID=E2X; Path=/\r\nConnection: close\r\n\r\n{}",
+                "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nnSet-Cookie: SID=E2X; Path=/\r\nConnection: close\r\n\r\n{}",
                 PAGE.len(),
                 PAGE
             );
+            let resp = resp.replace("\r\nnSet-Cookie", "\r\nSet-Cookie");
             sock.write_all(resp.as_bytes()).await.expect("write page");
         }
         let _ = sock.shutdown().await;
@@ -125,7 +151,8 @@ async fn full_cycle_gate_page_to_token_to_submit() {
         .await
         .expect("bind");
     let addr = listener.local_addr().expect("addr");
-    let server = tokio::spawn(mock_gate(listener));
+    let stats = TelemetryStats::default();
+    let server = tokio::spawn(mock_gate(listener, stats.clone()));
     let url = format!("http://{addr}/gate");
 
     let catalog = engine_catalog().expect("catalog");
@@ -209,6 +236,75 @@ async fn full_cycle_gate_page_to_token_to_submit() {
     assert_eq!(resp.status().as_u16(), 200);
     let body = resp.text().await.expect("body");
     assert_eq!(body, "accepted");
+
+    let route = f.page.telemetry_route.clone().expect("in-house route from inline hint");
+    assert_eq!(route.provider, parser_pipeline::TelemetryProvider::InHouse);
+    let persona = payload_gen::input::Persona::derive(0xABC, session.id.as_raw());
+    let mut tab = payload_gen::input::TabSession::start(
+        persona,
+        0xABC,
+        session.id.as_raw(),
+        (180.0, 140.0),
+        (860.0, 540.0),
+        30.0,
+        None,
+        0,
+        0,
+    );
+    let mut batcher = payload_gen::input::TelemetryBatcher::new(
+        payload_gen::input::BATCH_CAP,
+        payload_gen::input::BATCH_INTERVAL_US,
+    );
+    let mut scratch: Vec<payload_gen::input::RawEvent> = Vec::new();
+    let mut now = 0u64;
+    let mut pushed = 0u32;
+    batcher.begin(0);
+    while now < 25_000_000 {
+        let tick = tab.advance(now);
+        now = tick.next_due_us.max(now + 1);
+        if tick.events.is_empty() {
+            if batcher.ready(now) && !scratch.is_empty() {
+                let status = net_client::push_telemetry(
+                    &engines,
+                    0,
+                    &mut session,
+                    &route,
+                    payload_gen::input::events_bytes(&scratch),
+                )
+                .await
+                .expect("telemetry push");
+                assert_eq!(status, 204);
+                pushed += 1;
+                scratch.clear();
+                batcher.begin(now);
+            }
+            continue;
+        }
+        batcher.feed(tick.events.len());
+        scratch.extend_from_slice(&tick.events);
+        if batcher.ready(now) {
+            let status = net_client::push_telemetry(
+                &engines,
+                0,
+                &mut session,
+                &route,
+                payload_gen::input::events_bytes(&scratch),
+            )
+            .await
+            .expect("telemetry push");
+            assert_eq!(status, 204);
+            pushed += 1;
+            scratch.clear();
+            batcher.begin(now);
+        }
+    }
+    assert!(pushed >= 2, "точки обязаны доехать до сайта батчами: {pushed}");
+    assert!(
+        stats.bytes.load(Ordering::Relaxed) >= pushed as u64 * 16,
+        "байты событий реально получены сайтом: {}",
+        stats.bytes.load(Ordering::Relaxed)
+    );
+    assert!(stats.batches.load(Ordering::Relaxed) >= 2);
 
     server.await.expect("server join");
     drop(drain);

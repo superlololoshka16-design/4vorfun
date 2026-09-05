@@ -232,12 +232,12 @@ impl StreamPipeline {
                 let cleaned = crate::normalize_stream(chunk, bump);
                 self.rewriter_mut().write(cleaned).map_err(|_| PipeError::MemoryBrake)
             })
-        } else if simdutf8::basic::from_utf8(chunk).is_ok() {
+        } else if core_utils::utf8::basic::from_utf8(chunk).is_ok() {
             self.rewriter_mut().write(chunk).map_err(|_| PipeError::MemoryBrake)
         } else {
             self.utf8_bad_chunks += 1;
             let mut end = chunk.len();
-            while end > 0 && simdutf8::basic::from_utf8(&chunk[..end]).is_err() {
+            while end > 0 && core_utils::utf8::basic::from_utf8(&chunk[..end]).is_err() {
                 end -= 1;
             }
             if end == 0 {

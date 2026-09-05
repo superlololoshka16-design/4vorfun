@@ -18,14 +18,14 @@ impl Bundle {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, BundleError> {
         let file = File::open(path)?;
         let map = unsafe { memmap2::Mmap::map(&file)? };
-        if simdutf8::basic::from_utf8(&map).is_err() {
+        if core_utils::utf8::basic::from_utf8(&map).is_err() {
             return Err(BundleError::Utf8);
         }
         Ok(Self { map })
     }
 
     pub fn as_str(&self) -> &str {
-        simdutf8::basic::from_utf8(&self.map).expect("validated at load")
+        core_utils::utf8::basic::from_utf8(&self.map).expect("validated at load")
     }
 
     pub fn len(&self) -> usize {

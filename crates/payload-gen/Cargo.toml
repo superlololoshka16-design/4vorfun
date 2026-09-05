@@ -9,7 +9,7 @@ session-state = { workspace = true }
 sha2 = { workspace = true }
 md-5 = { workspace = true }
 hex = { workspace = true }
-twox-hash = { workspace = true }
+core-utils = { workspace = true }
 phf = { workspace = true }
 thiserror = { workspace = true }
 smallvec = { workspace = true }

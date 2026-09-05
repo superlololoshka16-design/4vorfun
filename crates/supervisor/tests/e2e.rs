@@ -165,7 +165,7 @@ async fn full_cycle_gate_page_to_token_to_submit() {
     );
     let outcome = pool
         .exec(ExecReq {
-            domain: payload_gen::xxh3(b"gate.local"),
+            domain: core_utils::xxh3::hash(b"gate.local"),
             script: challenge.clone(),
             snap,
             timeout: Duration::from_millis(500),
@@ -184,7 +184,7 @@ async fn full_cycle_gate_page_to_token_to_submit() {
 
     let replay = pool
         .exec(ExecReq {
-            domain: payload_gen::xxh3(b"gate.local"),
+            domain: core_utils::xxh3::hash(b"gate.local"),
             script: challenge.clone(),
             snap: ProfileSnap::from_parts(session.profile.as_ref(), f.uri.as_str(), ""),
             timeout: Duration::from_millis(500),

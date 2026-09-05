@@ -1,5 +1,5 @@
 use compact_str::CompactString;
-use payload_gen::xxh3;
+use core_utils::xxh3;
 use session_state::{Family, NetKind, Platform, Profile};
 use std::sync::Arc;
 use wreq::IntoEmulation as _;
@@ -175,7 +175,7 @@ fn build_profile(row: &CatalogRow, origin_seed: u64) -> Result<Arc<Profile>, Str
         tz: row.tz.into(),
         screen_w: row.screen.0,
         screen_h: row.screen.1,
-        canvas_seed: xxh3(ua.as_bytes()) ^ origin_seed.rotate_left(23),
+        canvas_seed: xxh3::hash(ua.as_bytes()) ^ origin_seed.rotate_left(23),
         webgl_vendor: row.vendor.into(),
         webgl_renderer: row.renderer.into(),
         asn: 0,
@@ -208,7 +208,7 @@ pub fn engine_catalog() -> Result<Vec<CatalogEntry>, String> {
 
 pub fn reslot(profile: &Profile, asn: u32) -> Arc<Profile> {
     let mut next = profile.clone();
-    next.canvas_seed = xxh3(next.ua.as_bytes()) ^ (asn as u64).rotate_left(23);
+    next.canvas_seed = xxh3::hash(next.ua.as_bytes()) ^ (asn as u64).rotate_left(23);
     next.asn = asn;
     Arc::new(next)
 }

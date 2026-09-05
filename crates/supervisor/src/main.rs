@@ -5,7 +5,7 @@ use clap::{Parser, Subcommand};
 use compact_str::CompactString;
 use net_client::{EngineSet, Fetched, engine_catalog, reslot};
 use parser_pipeline::PageData;
-use payload_gen::xxh3;
+use core_utils::xxh3;
 use runtime_exec::{Bundle, Event, EventTx, ExecReq, ProfileSnap, WorkerPool};
 use session_state::{Profile, Session, StateStore};
 use smallvec::SmallVec;
@@ -74,7 +74,7 @@ struct Engine {
 }
 
 fn profile_slot_for(host: &str, catalog_len: usize) -> usize {
-    (xxh3(host.as_bytes()) as usize) % catalog_len.max(1)
+    (xxh3::hash(host.as_bytes()) as usize) % catalog_len.max(1)
 }
 
 impl Engine {
@@ -97,7 +97,7 @@ impl Engine {
                         std::str::from_utf8(&cookie_buf).unwrap_or(""),
                     );
                     let req = ExecReq {
-                        domain: xxh3(host.as_bytes()),
+                        domain: xxh3::hash(host.as_bytes()),
                         script,
                         snap,
                         timeout: self.timeout,

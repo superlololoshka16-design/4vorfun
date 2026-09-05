@@ -44,7 +44,7 @@ impl VersionMonitor {
 
     /// Возвращает true, если контент URL изменился с прошлого раза.
     pub fn check(&self, url: &str, content: &[u8]) -> bool {
-        let new_hash = payload_gen::xxh3(content);
+        let new_hash = core_utils::xxh3::hash(content);
         let changed = self
             .hashes
             .read_sync(url, |_, v| v.load(Ordering::Relaxed) != new_hash)

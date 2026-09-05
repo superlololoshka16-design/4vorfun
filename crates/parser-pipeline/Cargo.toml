@@ -6,11 +6,8 @@ rust-version.workspace = true
 
 [dependencies]
 lol_html = { workspace = true }
-sonic-rs = { workspace = true }
-simdutf8 = { workspace = true }
 aho-corasick = { workspace = true }
 memchr = { workspace = true }
-base64-simd = { workspace = true }
 compact_str = { workspace = true }
 smallvec = { workspace = true }
 bytes = { workspace = true }
@@ -19,4 +16,4 @@ serde = { workspace = true }
 thiserror = { workspace = true }
 phf = { workspace = true }
 scc = { workspace = true }
-payload-gen = { workspace = true }
+core-utils = { workspace = true }

@@ -551,6 +551,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 
 [[package]]
+name = "core-utils"
+version = "0.1.0"
+dependencies = [
+ "base64-simd",
+ "simdutf8",
+ "sonic-rs",
+ "twox-hash",
+]
+
+[[package]]
 name = "core_affinity"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2001,9 +2011,9 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "compact_str",
+ "core-utils",
  "futures-util",
  "parser-pipeline",
- "payload-gen",
  "session-state",
  "smallvec",
  "thiserror 2.0.20",
@@ -2434,19 +2444,16 @@ name = "parser-pipeline"
 version = "0.1.0"
 dependencies = [
  "aho-corasick",
- "base64-simd",
  "bumpalo",
  "bytes",
  "compact_str",
+ "core-utils",
  "lol_html",
  "memchr",
- "payload-gen",
  "phf 0.14.0",
  "scc",
  "serde",
- "simdutf8",
  "smallvec",
- "sonic-rs",
  "thiserror 2.0.20",
 ]
 
@@ -2454,6 +2461,7 @@ dependencies = [
 name = "payload-gen"
 version = "0.1.0"
 dependencies = [
+ "core-utils",
  "hex",
  "md-5",
  "phf 0.14.0",
@@ -2461,7 +2469,6 @@ dependencies = [
  "sha2 0.11.0",
  "smallvec",
  "thiserror 2.0.20",
- "twox-hash",
 ]
 
 [[package]]
@@ -2968,6 +2975,7 @@ dependencies = [
  "bumpalo",
  "bytes",
  "compact_str",
+ "core-utils",
  "core_affinity",
  "crossbeam-channel",
  "hex",
@@ -2984,12 +2992,10 @@ dependencies = [
  "rquickjs",
  "scc",
  "session-state",
- "simdutf8",
  "smallvec",
  "thiserror 2.0.20",
  "tokio",
  "tracing",
- "twox-hash",
  "wasmtime",
 ]
 
@@ -3401,10 +3407,10 @@ name = "supervisor"
 version = "0.1.0"
 dependencies = [
  "axum",
- "base64-simd",
  "bytes",
  "clap",
  "compact_str",
+ "core-utils",
  "core_affinity",
  "crossbeam-channel",
  "mimalloc",

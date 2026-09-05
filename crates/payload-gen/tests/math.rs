@@ -1,6 +1,7 @@
+use core_utils::xxh3;
 use payload_gen::{
     Rng, asn_info, canvas_hash, jitter_ratio, md5_hex_into, pick_profile, pow_search,
-    sha256_hex_into, webgl_param, xxh3, xxh3_seeded,
+    sha256_hex_into, webgl_param,
 };
 use session_state::{Family, NetKind, Platform, Profile};
 use std::sync::Arc;
@@ -72,9 +73,9 @@ fn jitter_stays_in_band() {
 
 #[test]
 fn xxh3_stable_and_seeded() {
-    assert_eq!(xxh3(b"silo"), xxh3(b"silo"));
-    assert_ne!(xxh3(b"silo"), xxh3(b"siol"));
-    assert_ne!(xxh3_seeded(1, b"silo"), xxh3_seeded(2, b"silo"));
+    assert_eq!(xxh3::hash(b"silo"), xxh3::hash(b"silo"));
+    assert_ne!(xxh3::hash(b"silo"), xxh3::hash(b"siol"));
+    assert_ne!(xxh3::hash_seeded(1, b"silo"), xxh3::hash_seeded(2, b"silo"));
 }
 
 #[test]

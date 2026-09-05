@@ -1,4 +1,4 @@
-use base64_simd::{AsOut, STANDARD};
+use core_utils::base64::{AsOut, STANDARD};
 use smallvec::SmallVec;
 use thiserror::Error;
 

@@ -9,7 +9,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use net_client::{EngineSet, Fetched, fetch_page_sel, reslot};
 use parser_pipeline::{StreamPipeline, validate_selectors};
-use payload_gen::xxh3;
+use core_utils::xxh3;
 use runtime_exec::{ExecReq, ProfileSnap, WorkerPool};
 use scc::HashMap;
 use serde::{Deserialize, Serialize};
@@ -261,7 +261,7 @@ async fn execute(st: &AppState, kind: &TaskKind) -> Result<serde_json::value::Va
 
 fn profile_for(st: &AppState, url: &str) -> (usize, Arc<Profile>) {
     let host = host_of(url);
-    let slot = (xxh3(host.as_bytes()) as usize) % st.profiles.len().max(1);
+    let slot = (xxh3::hash(host.as_bytes()) as usize) % st.profiles.len().max(1);
     let profile = reslot(st.profiles[slot].as_ref(), st.asn);
     (slot, profile)
 }
@@ -376,7 +376,7 @@ fn upsert(body: &mut Vec<(String, String)>, k: String, v: String) {
 
 fn decode_b64_script(b64: &str) -> Result<String, String> {
     let trimmed = b64.trim_ascii();
-    let bytes = base64_simd::STANDARD
+    let bytes = core_utils::base64::STANDARD
         .decode_to_vec(trimmed.as_bytes())
         .map_err(|e| {
             let mut s = String::with_capacity(32);
@@ -411,7 +411,7 @@ async fn solve_json(
     };
     let timeout = deadline_ms.map(Duration::from_millis).unwrap_or(st.timeout);
     let req = ExecReq {
-        domain: xxh3(script.as_bytes()),
+        domain: xxh3::hash(script.as_bytes()),
         script: bytes::Bytes::from(script.into_bytes()),
         snap: ProfileSnap::from_parts(&profile, "https://challenge.local/", ""),
         timeout,
@@ -439,7 +439,7 @@ async fn solve_challenge(st: &AppState, session: &mut Session, f: &Fetched) -> O
         std::str::from_utf8(&cookie_buf).unwrap_or(""),
     );
     let req = ExecReq {
-        domain: xxh3(host_of(f.uri.as_str()).as_bytes()),
+        domain: xxh3::hash(host_of(f.uri.as_str()).as_bytes()),
         script,
         snap,
         timeout: st.timeout,

@@ -11,8 +11,8 @@ struct NextDataRaw<'a> {
     query: Option<&'a str>,
 }
 
-pub fn parse_next_data(json: &[u8]) -> Result<NextData, sonic_rs::Error> {
-    let raw: NextDataRaw<'_> = sonic_rs::from_slice(json)?;
+pub fn parse_next_data(json: &[u8]) -> Result<NextData, core_utils::json::Error> {
+    let raw: NextDataRaw<'_> = core_utils::json::from_slice(json)?;
     Ok(NextData {
         page: compact_str::CompactString::new(raw.page),
         build_id: compact_str::CompactString::new(raw.build_id),

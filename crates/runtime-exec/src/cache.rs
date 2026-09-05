@@ -1,5 +1,5 @@
 use crate::normalize::Lit;
-use payload_gen::xxh3;
+use core_utils::xxh3;
 use scc::HashMap;
 use smallvec::SmallVec;
 use std::sync::Arc;
@@ -35,7 +35,7 @@ impl NormCache {
     }
 
     pub fn raw_hash(script: &[u8]) -> u64 {
-        xxh3(script)
+        xxh3::hash(script)
     }
 
     pub(crate) fn lookup_raw(

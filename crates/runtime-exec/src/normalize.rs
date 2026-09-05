@@ -7,7 +7,7 @@ use oxc_semantic::SemanticBuilder;
 use oxc_span::SPAN;
 use oxc_span::SourceType;
 use oxc_traverse::{Traverse, TraverseCtx, traverse_mut};
-use payload_gen::xxh3;
+use core_utils::xxh3;
 use smallvec::SmallVec;
 use std::io::Write as _;
 use std::sync::Arc;
@@ -143,7 +143,7 @@ fn canon_ident<'a, A: oxc_allocator::GetAllocator<'a>>(idx: u32, alloc: &A) -> I
 }
 
 pub fn normalize(script: &[u8]) -> Result<Normalized, ()> {
-    let text = simdutf8::basic::from_utf8(script).map_err(|_| ())?;
+    let text = core_utils::utf8::basic::from_utf8(script).map_err(|_| ())?;
     // Thread-local oxc::Allocator: reset() на каждом вызове — без malloc/free.
     // Lifetime результатов привязан к зоне видимости with().
     OXC_ALLOC.with(|cell| {
@@ -187,7 +187,7 @@ pub fn normalize(script: &[u8]) -> Result<Normalized, ()> {
         wrapped.push_str("(function(__silo_args, __silo_sha256, __silo_md5){");
         wrapped.push_str(&code);
         wrapped.push_str("})");
-        let skel = xxh3(wrapped.as_bytes());
+        let skel = xxh3::hash(wrapped.as_bytes());
         Ok(Normalized { src: Arc::from(wrapped), skel, args })
     })
 }

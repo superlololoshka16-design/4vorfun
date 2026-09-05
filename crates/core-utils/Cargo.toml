@@ -1,0 +1,11 @@
+[package]
+name = "core-utils"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+sonic-rs = { workspace = true }
+base64-simd = { workspace = true }
+simdutf8 = { workspace = true }
+twox-hash = { workspace = true }

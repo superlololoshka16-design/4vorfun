@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
     "crates/core-utils",
+    "crates/human-input",
     "crates/session-state",
     "crates/payload-gen",
     "crates/net-client",
@@ -49,6 +50,7 @@ base64-simd = "0.8.0"
 
 compact_str = { version = "0.10.0", features = ["serde"] }
 smallvec = { version = "1.16.0", features = ["write"] }
+bytemuck = { version = "1.24", features = ["derive"] }
 indexmap = "2.14.1"
 ahash = "0.8.12"
 arc-swap = "1.9.2"

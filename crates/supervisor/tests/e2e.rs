@@ -246,6 +246,7 @@ async fn full_cycle_gate_page_to_token_to_submit() {
         cookies.push((k.to_string(), v.to_string()));
     }
     let tab = fleet.attach(prof, url.as_str(), &session.jar, route, 0, 8);
+    assert_ne!(tab, u32::MAX);
     let _ = cookies;
     let base = supervisor::fleet::now_us();
     let mut pushed = 0u32;

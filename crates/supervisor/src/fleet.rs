@@ -2,11 +2,12 @@ use compact_str::CompactString;
 use net_client::EngineSet;
 use parser_pipeline::TelemetryRoute;
 use payload_gen::input::{
-    InputHub, Persona, RawEvent, TabEvents, TabInput, TabSession, TelemetryBatcher, BATCH_CAP,
-    BATCH_INTERVAL_US, events_bytes,
+    InputHub, Persona, RawEvent, TabEvents, TabInput, TabSession, TelemetryBatcher,
+    BATCH_CAP, BATCH_INTERVAL_US, events_bytes,
 };
 use session_state::{CookieJar, Profile, Session};
 use smallvec::SmallVec;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 pub struct PushJob {
@@ -23,6 +24,7 @@ struct FleetSlot {
     session: Session,
     engine_slot: usize,
     site: u32,
+    hub_tab: u32,
     route: TelemetryRoute,
     batcher: TelemetryBatcher,
     scratch: Vec<RawEvent>,
@@ -34,7 +36,18 @@ pub struct Fleet {
     hub: InputHub,
     slots: Vec<Option<FleetSlot>>,
     free: Vec<u32>,
+    tab_to_slot: Vec<u32>,
+    sites: HashMap<u64, u32>,
     engines: Arc<EngineSet>,
+}
+
+fn site_key(origin: &str) -> u64 {
+    let host = origin
+        .split_once("://")
+        .map(|(_, rest)| rest)
+        .unwrap_or(origin);
+    let cut = host.find(['/', '?', '#']).unwrap_or(host.len());
+    core_utils::xxh3::hash(host[..cut].as_bytes())
 }
 
 impl Fleet {
@@ -43,6 +56,8 @@ impl Fleet {
             hub: InputHub::new(),
             slots: Vec::new(),
             free: Vec::new(),
+            tab_to_slot: Vec::new(),
+            sites: HashMap::new(),
             engines,
         }
     }
@@ -56,8 +71,17 @@ impl Fleet {
         engine_slot: usize,
         weight: u32,
     ) -> u32 {
-        let site = self.hub.register_site(3);
-        let tab = self.hub.open_tab(site, weight);        let persona = Persona::derive(profile.canvas_seed, tab.0 as u64);
+        let key = site_key(origin);
+        let site = match self.sites.get(&key) {
+            Some(&s) => s,
+            None => {
+                let s = self.hub.register_site(3);
+                self.sites.insert(key, s);
+                s
+            }
+        };
+        let tab = self.hub.open_tab(site, weight);
+        let persona = Persona::derive(profile.canvas_seed, tab.0 as u64);
         let vw = profile.screen_w.max(320) as f64;
         let vh = profile.screen_h.max(240) as f64;
         let seed = profile.canvas_seed ^ (tab.0 as u64).wrapping_mul(0x9E3779B97F4A7C15);
@@ -84,6 +108,7 @@ impl Fleet {
             session: http_session,
             engine_slot,
             site,
+            hub_tab: tab.0,
             route,
             batcher: TelemetryBatcher::new(BATCH_CAP, BATCH_INTERVAL_US),
             scratch: Vec::with_capacity(BATCH_CAP + 32),
@@ -97,8 +122,19 @@ impl Fleet {
             self.slots.push(Some(slot));
             (self.slots.len() - 1) as u32
         };
+        while self.tab_to_slot.len() <= tab.0 as usize {
+            self.tab_to_slot.push(u32::MAX);
+        }
+        self.tab_to_slot[tab.0 as usize] = idx;
         self.hub.set_input(tab, TabInput::Session(session));
         idx
+    }
+
+    fn slot_of(&self, tab: u32) -> Option<usize> {
+        let idx = *self.tab_to_slot.get(tab as usize)?;
+        (idx != u32::MAX)
+            .then(|| idx as usize)
+            .and_then(|i| self.slots.get(i).and_then(|s| s.as_ref().map(|_| i)))
     }
 
     pub fn calibrate(&self, tab: u32, ok: bool) {
@@ -110,9 +146,8 @@ impl Fleet {
     }
 
     fn tab_site(&self, tab: u32) -> Option<u32> {
-        self.slots
-            .get(tab as usize)
-            .and_then(|s| s.as_ref().map(|s| s.site))
+        let i = self.slot_of(tab)?;
+        self.slots.get(i).and_then(|s| s.as_ref().map(|s| s.site))
     }
 
     fn trust_of(&self, site: u32) -> i32 {
@@ -132,7 +167,10 @@ impl Fleet {
         let mut events: TabEvents = SmallVec::new();
         self.hub.tick(now_us, &mut events);
         for (tab, ev) in events {
-            let Some(slot) = self.slots.get_mut(tab.0 as usize).and_then(|s| s.as_mut()) else {
+            let Some(i) = self.slot_of(tab.0) else {
+                continue;
+            };
+            let Some(slot) = self.slots.get_mut(i).and_then(|s| s.as_mut()) else {
                 continue;
             };
             slot.scratch.push(ev);
@@ -148,7 +186,7 @@ impl Fleet {
                 slot.scratch.clear();
                 slot.batcher.begin(now_us);
                 jobs.push(PushJob {
-                    tab: i as u32,
+                    tab: slot.hub_tab,
                     slot: slot.engine_slot,
                     endpoint: slot.route.endpoint.clone(),
                     transport: slot.route.transport,
@@ -161,7 +199,10 @@ impl Fleet {
     }
 
     pub async fn push(&mut self, job: &PushJob) -> u16 {
-        let Some(slot) = self.slots.get_mut(job.tab as usize).and_then(|s| s.as_mut()) else {
+        let Some(i) = self.slot_of(job.tab) else {
+            return 0;
+        };
+        let Some(slot) = self.slots.get_mut(i).and_then(|s| s.as_mut()) else {
             return 0;
         };
         let route = TelemetryRoute {

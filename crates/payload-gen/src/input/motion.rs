@@ -4,7 +4,8 @@ use crate::input::persona::Persona;
 use crate::input::prng::SplitMix64Rng;
 
 const OVERSHOOT_MIN_PX: f64 = 200.0;
-const ARRIVE_EPS_PX: f64 = 0.75;
+const ARRIVE_EPS_PX: f64 = 1.0;
+const FINAL_APPROACH_US: u64 = 150_000;
 const SQRT3: f64 = 1.7320508075688772;
 const SQRT5: f64 = 2.2360679774997896;
 
@@ -199,9 +200,9 @@ impl MotionCursor {
         let to_aim = ((self.aim_x - self.x).powi(2) + (self.aim_y - self.y).powi(2)).sqrt();
         let deadline = now_us >= self.deadline_us;
         if to_aim <= ARRIVE_EPS_PX || deadline {
-            if (self.aim_x - self.target_x).abs() < 1e-9
-                && (self.aim_y - self.target_y).abs() < 1e-9
-            {
+            let aim_is_target = (self.aim_x - self.target_x).abs() < 1e-9
+                && (self.aim_y - self.target_y).abs() < 1e-9;
+            if aim_is_target && self.on_target() {
                 self.enter_dwell(now_us);
             } else if self.corrections_left > 0 {
                 self.corrections_left -= 1;
@@ -210,11 +211,19 @@ impl MotionCursor {
                 self.max_step = (self.max_step * 0.55).max(2.5);
                 self.gravity *= 1.3;
                 self.wind *= 0.5;
-                if deadline {
-                    self.deadline_us = now_us + 120_000;
-                }
+                self.deadline_us = now_us + FINAL_APPROACH_US;
+            } else if aim_is_target {
+                self.corrections_left = 1;
+                self.gravity *= 1.6;
+                self.max_step = 2.5;
+                self.deadline_us = now_us + FINAL_APPROACH_US;
             } else {
-                self.enter_dwell(now_us);
+                self.aim_x = self.target_x;
+                self.aim_y = self.target_y;
+                self.corrections_left = 0;
+                self.max_step = 2.5;
+                self.gravity *= 1.6;
+                self.deadline_us = now_us + FINAL_APPROACH_US;
             }
             return true;
         }

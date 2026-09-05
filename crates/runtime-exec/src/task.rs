@@ -51,6 +51,7 @@ pub struct ExecReq {
     pub script: Bytes,
     pub snap: ProfileSnap,
     pub timeout: Duration,
+    pub doc: Option<Arc<parser_pipeline::PageData>>,
 }
 
 pub(crate) struct ExecTask {
@@ -102,7 +103,6 @@ impl std::fmt::Display for ExecError {
     }
 }
 
-/// hex всегда ASCII — [u8; 32] -> CompactString, ноль аллокаций на куче.
 #[inline(always)]
 fn parse_hex_token(ch: &[u8; 32]) -> CompactString {
     let mut s = compact_str::CompactString::with_capacity(64);

@@ -15,7 +15,6 @@ pub use types::{ChallengeType, FieldData, FieldKind, Form, FormData, NextData, P
 
 use compact_str::CompactString;
 
-/// Валидация CSS-селекторов перед постройкой rewriter'а (Extract-задачи).
 pub fn validate_selectors(sels: &[(String, String)]) -> Result<(), String> {
     for (name, sel) in sels {
         sel.parse::<lol_html::Selector>().map_err(|e| {
@@ -30,9 +29,6 @@ pub fn validate_selectors(sels: &[(String, String)]) -> Result<(), String> {
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
-/// Мониторинг версий челлендж-скриптов: xxh3 контента против сохранённого.
-/// Первый check() для URL кладёт хэш и возвращает false, последующие —
-/// true при изменении (выкатили новый билд wasm/js).
 pub struct VersionMonitor {
     hashes: scc::HashMap<CompactString, AtomicU64>,
 }
@@ -42,7 +38,6 @@ impl VersionMonitor {
         Self { hashes: scc::HashMap::new() }
     }
 
-    /// Возвращает true, если контент URL изменился с прошлого раза.
     pub fn check(&self, url: &str, content: &[u8]) -> bool {
         let new_hash = core_utils::xxh3::hash(content);
         let changed = self
@@ -79,7 +74,6 @@ thread_local! {
     });
 }
 
-/// Сброс арены + выполнение замыкания. 1 такт CPU, ноль malloc/free.
 #[inline(always)]
 pub fn run_task_scoped<F, R>(f: F) -> R
 where
@@ -92,7 +86,6 @@ where
     })
 }
 
-/// Нормализация chunk: fast path (нет \r) = zero-copy slice, slow path = bump Vec.
 #[inline(always)]
 pub fn normalize_stream<'a>(chunk: &'a [u8], bump: &'a Bump) -> &'a [u8] {
     if !chunk.contains(&b'\r') {
@@ -107,8 +100,6 @@ pub fn normalize_stream<'a>(chunk: &'a [u8], bump: &'a Bump) -> &'a [u8] {
     v.into_bump_slice()
 }
 
-/// Сборка payload-строки в арене — ноль аллокаций на куче.
-/// Применение: подпись задачи в serve-диспетчере, key:id payload.
 #[inline(always)]
 pub fn build_payload<'a>(key: &str, id: u64, bump: &'a Bump) -> &'a str {
     use core::fmt::Write;

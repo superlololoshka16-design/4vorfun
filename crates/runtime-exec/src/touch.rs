@@ -3,8 +3,6 @@ use std::fmt;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::LazyLock;
 
-/// Интернированные имена API. Индекс = бит в маске. Имена никогда
-/// не появляются в JS-контексте: строка живёт только в дампе.
 pub struct ApiKey;
 
 impl ApiKey {
@@ -99,7 +97,6 @@ impl ApiKey {
     pub const TOTAL: u32 = 88;
 }
 
-/// Имена для холодного дампа: индекс → строка. Ноль строк в горячем пути.
 static KEY_NAMES: LazyLock<[&'static str; ApiKey::TOTAL as usize]> = LazyLock::new(|| {
     [
         "navigator.userAgent",
@@ -193,15 +190,11 @@ static KEY_NAMES: LazyLock<[&'static str; ApiKey::TOTAL as usize]> = LazyLock::n
     ]
 });
 
-/// Дампа-имена: O(1) по индексу, без линейных поисков.
 #[inline]
 pub fn key_name(idx: u32) -> &'static str {
     KEY_NAMES[idx as usize]
 }
 
-/// Битовая маска касаний: один u64 на каждые 64 API-ключа. Запись —
-/// OR одного бита, lock-free. Итог за задачу — ровно `words()` слов
-/// вместо вектора записей на каждое обращение.
 #[repr(align(64))]
 pub struct TouchLog {
     words: [Cell<u64>; TouchLog::words()],
@@ -226,7 +219,6 @@ impl TouchLog {
         }
     }
 
-    /// Число затронутых API (popcount по маске) — итог в ExecOutcome.
     pub fn count(&self) -> u32 {        let mut n = 0u32;
         for w in &self.words {
             n += w.get().count_ones();
@@ -234,8 +226,6 @@ impl TouchLog {
         n
     }
 
-    /// Какие ключи тронуты: возвращает индексы установленных битов
-    /// в холодный дамп. Порядок — по возрастанию индекса.
     pub fn touched_keys(&self) -> impl Iterator<Item = u32> + '_ {
         self.words
             .iter()
@@ -255,7 +245,6 @@ impl TouchLog {
     }
 }
 
-/// Счётчик номеров задач — просто чтобы дамп снабдить контекстом.
 static TASK_SEQ: AtomicU32 = AtomicU32::new(0);
 
 pub fn next_task_seq() -> u32 {
@@ -270,27 +259,21 @@ thread_local! {
     static LOG: TouchLog = const { TouchLog { words: [const { Cell::new(0) }; TouchLog::words()] } };
 }
 
-/// Запись касания из нативного Rust-геттера: в JS-окружении не существует
-/// ни одной видимой функции трассировки — `__silo_touch` в window нет.
 #[inline(always)]
 pub fn touch_log_record(key: u32) {
     LOG.with(|l| l.record(key));
 }
 
-/// Сброс перед новой задачей (вызывается на нити воркера в начале run()).
-/// Каждый сброс = новая задача: seq инкрементится, дамп получает контекст.
 pub fn touch_log_reset() -> u32 {
     let seq = next_task_seq();
     LOG.with(|l| l.clear());
     seq
 }
 
-/// Итог в ExecOutcome: сколько уникальных API тронул скрипт.
 pub fn touch_log_count() -> u64 {
     LOG.with(|l| l.count() as u64)
 }
 
-/// Холодный дамп: имена затронутых API. Строки материализуются только здесь.
 pub fn touch_log_dump() -> TouchDump {
     let seq = task_seq();
     let keys: Vec<u32> = LOG.with(|l| l.touched_keys().collect());

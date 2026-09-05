@@ -67,6 +67,7 @@ bumpalo = { version = "3.16", features = ["collections"] }
 
 rquickjs = { version = "0.12.2", features = ["macro"] }
 wasmtime = "48.0.1"
+rand = { version = "0.9", features = ["small_rng"] }
 
 oxc_allocator = "0.148.0"
 oxc_parser = "0.148.0"

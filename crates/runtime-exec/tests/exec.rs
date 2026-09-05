@@ -67,7 +67,69 @@ fn req(script: &str, timeout_ms: u64) -> ExecReq {
         script: Bytes::copy_from_slice(script.as_bytes()),
         snap: snap(),
         timeout: Duration::from_millis(timeout_ms),
+        doc: None,
     }
+}
+
+fn page_doc() -> Arc<parser_pipeline::PageData> {
+    let html = b"<html><head><title>T</title><script src=\"https://cdn.local/a.js\"></script></head><body><div id=\"gate\" class=\"box\"><input type=\"hidden\" name=\"csrf\" value=\"tok123\"></div><form action=\"/go\" method=\"POST\"></form></body></html>";
+    let mut p = parser_pipeline::StreamPipeline::new(Default::default());
+    p.push(html).expect("doc parses");
+    Arc::new(p.finish().expect("doc finish"))
+}
+
+#[tokio::test]
+async fn crypto_get_random_values_fills_in_place_with_chrome_errors() {
+    let pool = pool();
+    let fill = "var a = new Uint8Array(16); var r = crypto.getRandomValues(a); var acc = 0;\
+        for (var i = 0; i < 16; i++) { acc += a[i]; }\
+        (r === a) * 2 + (acc > 0 ? 1 : 0);";
+    let o = pool.exec(req(fill, 1000)).await;
+    assert_eq!(o.token.as_deref(), Some("3"), "identity + real fill: {:?}", o.err);
+
+    let quota = "var out;\
+        try { crypto.getRandomValues(new Uint8Array(65537)); out = \"no\"; }\
+        catch (e) { out = e.message.indexOf(\"QuotaExceededError\") === 0 ? \"quota\" : \"other:\" + e.message; }\
+        out;";
+    let o = pool.exec(req(quota, 1000)).await;
+    assert_eq!(o.token.as_deref(), Some("quota"), "chrome quota error: {:?}", o.err);
+
+    let ty = "var out;\
+        try { crypto.getRandomValues({}); out = \"no\"; }\
+        catch (e) { out = e.message.indexOf(\"TypeMismatchError\") === 0 ? \"type\" : \"other:\" + e.message; }\
+        out;";
+    let o = pool.exec(req(ty, 1000)).await;
+    assert_eq!(o.token.as_deref(), Some("type"), "chrome type error: {:?}", o.err);
+}
+
+#[tokio::test]
+async fn dom_bridge_reads_soa_indexes_and_keeps_identity() {
+    let pool = pool();
+    let script = "var n = document.scripts.length;\
+        var s = document.scripts.item(0).getAttribute(\"src\");\
+        var el = document.getElementById(\"gate\");\
+        var again = document.getElementById(\"gate\");\
+        n + \"|\" + (s.indexOf(\"a.js\") >= 0) + \"|\" + el.tagName + \"|\" + el.className + \"|\" + (el === again);";
+    let mut r = req(script, 1000);
+    r.doc = Some(page_doc());
+    let o = pool.exec(r).await;
+    assert_eq!(
+        o.token.as_deref(),
+        Some("1|true|div|box|true"),
+        "soa -> handles: {:?}",
+        o.err
+    );
+}
+
+#[tokio::test]
+async fn dom_bridge_without_doc_degrades_to_empty() {
+    let pool = pool();
+    let script = "var l = document.scripts.length;\
+        var i = document.scripts.item(0);\
+        var e = document.getElementById(\"x\");\
+        l + \"|\" + (i === null) + \"|\" + (e === null);";
+    let o = pool.exec(req(script, 1000)).await;
+    assert_eq!(o.token.as_deref(), Some("0|true|true"), "no doc: {:?}", o.err);
 }
 
 #[tokio::test]

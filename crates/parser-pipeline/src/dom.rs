@@ -1,18 +1,8 @@
-//! Плоское SoA DOM-дерево из README: одна непрерывная память, ноль указателей.
-//!
-//! - узлы — индексы `u32` в параллельных векторах (parents/children/siblings);
-//! - теги и имена атрибутов — интернированные `u16` (статическая phf-таблица);
-//! - значения атрибутов и текст — спаны `(u32 off, u16 len)` в общем байтовом пуле;
-//! - удаление узла — генерационная арена: слот помечается свободным, `generation`
-//!   инкрементится, повторное использование дыры не ломает старые NodeId (ABA-safe);
-//! - индексы (scripts/forms/inputs/title/meta) набиваются на потоку за один проход
-//!   и дают O(1) выборку для рантайма вместо сканирования дерева.
 
 use compact_str::CompactString;
 use smallvec::SmallVec;
 use std::collections::HashMap;
 
-/// Константные id тегов, участвующих в правилах дерева (значения = phf-таблица).
 pub mod tags {
     pub const AREA: u16 = 4;
     pub const BASE: u16 = 9;
@@ -48,14 +38,12 @@ pub mod tags {
     pub const WBR: u16 = 113;
 }
 
-/// Идентификатор узла: индекс + поколение.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct NodeId {
     pub index: u32,
     pub generation: u32,
 }
 
-/// Спан строки в общем пуле: смещение (u32) + длина (u16). 6 байт.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StrSpan {
     pub off: u32,
@@ -64,7 +52,6 @@ pub struct StrSpan {
 
 pub const EMPTY_SPAN: StrSpan = StrSpan { off: 0, len: 0 };
 
-/// Битовые флаги узла.
 pub mod node_flags {
     pub const ELEMENT: u8 = 1 << 0;
     pub const TEXT: u8 = 1 << 1;
@@ -76,7 +63,6 @@ pub mod node_flags {
     pub const TRUNCATED: u8 = 1 << 7;
 }
 
-/// Статический интернер тегов: phf-хэш на этапе компиляции, ноль рантайм-аллокаций.
 pub static TAGS: phf::Map<&'static str, u16> = phf::phf_map! {
     "a" => 1, "abbr" => 2, "address" => 3, "area" => tags::AREA, "article" => 5,
     "aside" => 6, "audio" => 7, "b" => 8, "base" => tags::BASE, "bdi" => 10, "bdo" => 11,
@@ -104,13 +90,9 @@ pub static TAGS: phf::Map<&'static str, u16> = phf::phf_map! {
     "ul" => 110, "var" => 111, "video" => 112, "wbr" => tags::WBR,
 };
 
-/// Тег, не попавший в статическую таблицу.
 pub const TAG_UNKNOWN: u16 = u16::MAX;
-/// Свободный динамический диапазон id для неизвестных тегов.
 const DYNAMIC_TAG_BASE: u16 = 200;
 
-/// Обратные таблицы интернов: имя тега/атрибута по id за O(1) по индексу
-/// вместо линейного прохода по phf-записям на каждый вызов.
 static TAG_NAME_BY_ID: std::sync::LazyLock<Vec<Option<&'static str>>> =
     std::sync::LazyLock::new(|| {
         let mut v: Vec<Option<&'static str>> = vec![None; DYNAMIC_TAG_BASE as usize];
@@ -129,7 +111,6 @@ static ATTR_NAME_BY_ID: std::sync::LazyLock<Vec<Option<&'static str>>> =
         v
     });
 
-/// Void-элементы HTML: закрывающего тега нет, в стек не кладём.
 #[inline]
 pub fn is_void_tag(tag: u16) -> bool {
     matches!(
@@ -142,7 +123,6 @@ pub fn is_void_tag(tag: u16) -> bool {
 
 pub const ATTR_UNKNOWN: u16 = u16::MAX;
 
-/// Статический интернер имён атрибутов.
 pub static ATTR_NAMES: phf::Map<&'static str, u16> = phf::phf_map! {
     "accept" => 1, "action" => 2, "alt" => 3, "async" => 4, "charset" => 5, "checked" => 6,
     "class" => 7, "cols" => 8, "content" => 9, "defer" => 10, "dir" => 11, "disabled" => 12,
@@ -163,13 +143,11 @@ const DYNAMIC_ATTR_BASE: u16 = 100;
 const ATTR_NAME_ID: u16 = 26;
 const ATTR_TYPE_ID: u16 = 50;
 
-/// Лимиты памяти дерева — общий бюджет укладывается в рамки одной задачи.
 #[derive(Debug, Clone, Copy)]
 pub struct DomLimits {
     pub max_nodes: usize,
     pub max_attrs: usize,
     pub pool_bytes: usize,
-    /// Лимит текста одного текстового узла.
     pub text_node_bytes: usize,
 }
 
@@ -184,14 +162,12 @@ impl Default for DomLimits {
     }
 }
 
-/// Атрибут узла: (имя-интерн, спан значения в пуле).
 #[derive(Debug, Clone, Copy)]
 pub struct Attr {
     pub name: u16,
     pub value: StrSpan,
 }
 
-/// SoA DOM: плоские параллельные векторы, линейная память под префетчер.
 pub struct DomTree {
     parents: Vec<u32>,
     first_child: Vec<u32>,
@@ -201,24 +177,18 @@ pub struct DomTree {
     tag_ids: Vec<u16>,
     flags: Vec<u8>,
     generations: Vec<u32>,
-    /// Спан текста (для TEXT-узлов).
     spans: Vec<StrSpan>,
-    /// Диапазон атрибутов узла в `attrs` (заполняется при открытии).
     attr_start: Vec<u32>,
     attr_count: Vec<u8>,
     attrs: Vec<Attr>,
-    /// Общий байтовый пул строк.
     pool: Vec<u8>,
-    /// Динамические интерны имён (копятся один раз на документ).
     tag_names: Vec<CompactString>,
     attr_name_table: Vec<CompactString>,
     free: Vec<u32>,
-    /// Лес корней: цепочка sibling-ссылок между узлами без родителя.
     roots_head: u32,
     roots_tail: u32,
     limits: DomLimits,
     truncated: bool,
-    /// Готовые индексы для рантайма: O(1) выборка коллекций.
     pub scripts: Vec<u32>,
     pub forms: Vec<u32>,
     pub inputs: Vec<u32>,
@@ -258,11 +228,6 @@ impl DomTree {
         }
     }
 
-    // ---------- Запись (вызывается колектором из потока событий) ----------
-
-    /// Удаление по индексу без сохранения порядка: swap_remove — O(1)
-    /// вместо retain-сдвига всей памяти. Порядок в наборах O(1)-выборки
-    /// не важен, это не упорядоченный список.
     #[inline]
     fn index_swap_remove(v: &mut Vec<u32>, i: u32) {
         if let Some(pos) = v.iter().position(|&x| x == i) {
@@ -296,7 +261,6 @@ impl DomTree {
             self.attr_start.push(0);
             self.attr_count.push(0);
         } else {
-            // слот из free-list: поколение уже инкрементировано при удалении
             let i = index as usize;
             self.parents[i] = parent;
             self.first_child[i] = u32::MAX;
@@ -313,8 +277,6 @@ impl DomTree {
         Some(index)
     }
 
-    /// Вставка узла в конец списка детей родителя (двусвязный sibling-лист).
-    /// Родителя нет (MAX) — узел прицепляется в хвост леса корней.
     fn link_child(&mut self, parent: u32, child: u32) {
         let (prev, p) = if parent == u32::MAX {
             (self.roots_tail, None)
@@ -340,10 +302,8 @@ impl DomTree {
         }
     }
 
-    /// Уложить строку в пул — единый монолитный буфер вместо кучи String.
     fn pool_put(&mut self, bytes: &[u8]) -> StrSpan {
         if bytes.len() > u16::MAX as usize {
-            // сверхдлинные строки режем по лимиту спана
             let cut = floor_char_boundary(bytes, u16::MAX as usize);
             return self.pool_put(&bytes[..cut]);
         }
@@ -374,7 +334,6 @@ impl DomTree {
             flags |= node_flags::VOID;
         }
         let node = self.push_slot(parent, tag, flags, EMPTY_SPAN)?;
-        // атрибуты: диапазон заполняется сразу при открытии узла
         let start = self.attrs.len() as u32;
         let mut count: u8 = 0;
         let mut hidden = false;
@@ -423,8 +382,6 @@ impl DomTree {
         let cut = floor_char_boundary(text, cut);
         let truncated = cut < text.len();
         let span = self.pool_put(&text[..cut]);
-        // смежность проверяется ДО аллокации слота: последовательные
-        // текст-чанки одного узла склеиваются в спан без push/unlink/free
         let last = self.last_child[parent as usize];
         if last != u32::MAX {
             let il = last as usize;
@@ -486,14 +443,11 @@ impl DomTree {
         self.free.push(node);
     }
 
-    /// Удаление узла извне (JS-мутации): unlink + генерационная инвалидация.
-    /// Старые NodeId с прошлым поколением перестают резолвиться — ABA-safe.
     pub fn remove_node(&mut self, id: NodeId) -> bool {
         let i = id.index as usize;
         if i >= self.parents.len() || self.generations[i] != id.generation {
             return false;
         }
-        // сначала каскадно освобождаем детей
         let mut child = self.first_child[i];
         while child != u32::MAX {
             let next = self.next_sibling[child as usize];
@@ -514,8 +468,6 @@ impl DomTree {
         }
         true
     }
-
-    // ---------- Чтение (O(1) доступ из рантайма) ----------
 
     #[inline]
     fn parent_index(&self, i: usize) -> Option<usize> {
@@ -560,7 +512,6 @@ impl DomTree {
         self.truncated
     }
 
-    /// Имя тега: статическая таблица (O(1) по индексу) или динамический интерн.
     pub fn tag_name(&self, tag: u16) -> Option<&str> {
         if tag == TAG_UNKNOWN {
             return None;
@@ -572,7 +523,6 @@ impl DomTree {
         }
     }
 
-    /// Текст TEXT-узла.
     pub fn text(&self, index: u32) -> Option<&str> {
         let i = index as usize;
         if self.flags[i] & node_flags::TEXT == 0 {
@@ -581,7 +531,6 @@ impl DomTree {
         self.span_str(self.spans[i])
     }
 
-    /// Значение атрибута по интернированному имени.
     pub fn attr(&self, index: u32, name: u16) -> Option<&str> {
         let i = index as usize;
         let start = self.attr_start[i] as usize;
@@ -594,7 +543,6 @@ impl DomTree {
         None
     }
 
-    /// Все атрибуты узла (для холодного дампа).
     pub fn attrs_of(&self, index: u32) -> impl Iterator<Item = (&str, &str)> {
         let i = index as usize;
         let start = self.attr_start[i] as usize;
@@ -608,8 +556,6 @@ impl DomTree {
         })
     }
 
-    /// Дети узла: обход по sibling-цепочке без аллокаций.
-    /// `u32::MAX` — лес корней документа.
     pub fn children(&self, index: u32) -> ChildIter<'_> {
         if index == u32::MAX {
             return ChildIter { tree: self, next: self.roots_head };
@@ -617,7 +563,6 @@ impl DomTree {
         ChildIter { tree: self, next: self.first_child[index as usize] }
     }
 
-    /// Голова леса корней (для полных обходов).
     pub fn roots_head(&self) -> u32 {
         self.roots_head
     }
@@ -626,7 +571,6 @@ impl DomTree {
         span_str_in(&self.pool, span)
     }
 
-    /// Глубина узла — путь до корня по parents, O(depth).
     pub fn depth(&self, mut index: u32) -> u32 {
         let mut d = 0;
         while let Some(p) = self.parent(index) {
@@ -636,7 +580,6 @@ impl DomTree {
         d
     }
 
-    /// Значение атрибута i-го узла из O(1)-индекса скриптов.
     pub fn script_attr(&self, i: usize, name: &str) -> Option<&str> {
         let node = *self.scripts.get(i)?;
         let name_id = ATTR_NAMES.get(name).copied()?;
@@ -661,7 +604,6 @@ impl DomTree {
     }
 }
 
-/// Итератор детей: одна ссылка на дерево, курсор u32 — нулевой оверхед.
 pub struct ChildIter<'a> {
     tree: &'a DomTree,
     next: u32,
@@ -700,7 +642,6 @@ fn reverse_attr_name(name: u16, dynamic: &[CompactString]) -> Option<&str> {
     ATTR_NAME_BY_ID[name as usize]
 }
 
-/// Обрезка UTF-8 по границе символа.
 fn floor_char_boundary(s: &[u8], limit: usize) -> usize {
     if s.len() <= limit {
         return s.len();
@@ -712,7 +653,6 @@ fn floor_char_boundary(s: &[u8], limit: usize) -> usize {
     i
 }
 
-/// Интернер тегов стриминга: u16 на горячем пути, неизвестные — динамический пул.
 pub struct TagInterner {
     dynamic: HashMap<CompactString, u16>,
     next_tag: u16,
@@ -747,7 +687,6 @@ impl TagInterner {
         }
     }
 
-    /// Таблица имён для дерева (копится один раз на документ).
     pub fn name_table(&self) -> Vec<CompactString> {
         let mut v: Vec<(u16, CompactString)> =
             self.dynamic.iter().map(|(k, id)| (*id, k.clone())).collect();
@@ -756,7 +695,6 @@ impl TagInterner {
     }
 }
 
-/// Интернер имён атрибутов.
 pub struct AttrNameInterner {
     dynamic: HashMap<CompactString, u16>,
     next: u16,
@@ -799,7 +737,6 @@ impl AttrNameInterner {
     }
 }
 
-/// Стек открытых элементов стрим-парсера + правила неявного закрытия.
 pub struct OpenStack {
     stack: SmallVec<[u32; 64]>,
 }
@@ -827,8 +764,6 @@ impl OpenStack {
         }
     }
 
-    /// Закрытие: выталкивает незакрытые элементы до совпадения тега
-    /// (recovery как у HTML-парсера, без паник).
     pub fn close(&mut self, tree: &DomTree, tag: u16) -> Option<u32> {
         let mut matched = None;
         for (from_top, &node) in self.stack.iter().rev().enumerate() {
@@ -844,8 +779,6 @@ impl OpenStack {
         self.stack.last().copied()
     }
 
-    /// Неявное закрытие перед открытием sibling-тега: `<p>` в `<p>`,
-    /// `<li>` в `<li>`, ячейки таблицы и опции селекта.
     pub fn imply_close(&mut self, tree: &DomTree, opening: u16) {
         while let Some(&top) = self.stack.last() {
             if sibling_closes(opening, tree.tag_id(top)) {

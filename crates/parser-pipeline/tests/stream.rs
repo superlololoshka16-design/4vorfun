@@ -48,7 +48,6 @@ fn whole_page_single_pass() {
         page.challenge.is_some(),
         "obfuscated script must be flagged"
     );
-    // SoA-дерево: индексы O(1), плоские векторы
     assert!(page.dom.scripts.len() >= 2, "script nodes indexed");
     assert_eq!(page.dom.forms.len(), 1, "form indexed");
     assert!(page.dom.inputs.len() >= 3, "input nodes indexed");
@@ -56,7 +55,6 @@ fn whole_page_single_pass() {
         .dom
         .tag_name(page.dom.tag_id(page.dom.title_node.unwrap()))
         .is_some_and(|t| t == "title"));
-    // O(1)-индексы: скрипты в порядке документа
     assert_eq!(page.dom.script_attr(0, "id"), Some("__NEXT_DATA__"));
     assert_eq!(page.dom.script_attr(1, "src"), Some("/static/js/chunk-a91.js"));
     assert_eq!(page.utf8_bad_chunks, 0);
@@ -175,7 +173,6 @@ fn adaptive_filter_keeps_only_target_tree() {
     let page = p.finish().unwrap();
     assert_eq!(page.forms.len(), 1);
     assert_eq!(page.dom.inputs.len(), 1);
-    // 64 мусорных div/p/span без id/class не создали узлов: дерево — только целевые
     assert!(
         page.dom.len() < 24,
         "junk must be filtered out, got {} nodes",
@@ -191,10 +188,8 @@ fn container_with_id_stays_in_tree() {
     p.push(html.as_bytes()).unwrap();
     let page = p.finish().unwrap();
     let dom = &page.dom;
-    // div с id — контейнер капчи — в дереве
     let app = find_by_tag(dom, "div").expect("app div");
     assert_eq!(dom.attr(app, parser_pipeline::ATTR_NAMES["id"]), Some("app"));
-    // обычный div без маркера — отфильтрован
     let mut count = 0;
     let mut q: std::collections::VecDeque<u32> = dom.children(u32::MAX).collect();
     while let Some(n) = q.pop_front() {
@@ -243,7 +238,6 @@ fn text_whitelist_and_truncation() {
     let btn = find_by_tag(dom, "button").expect("button");
     let bt = dom.children(btn).next().expect("btn text");
     assert_eq!(dom.text(bt), Some("btext"));
-    // div без маркера: текст мимо, узел не создан
     let mut plain = None;
     let mut q: std::collections::VecDeque<u32> = dom.children(u32::MAX).collect();
     while let Some(n) = q.pop_front() {
@@ -299,7 +293,6 @@ fn find_by_tag(dom: &parser_pipeline::DomTree, tag: &str) -> Option<u32> {
 
 #[test]
 fn dom_sibling_rules_and_generations() {
-    // <option> не вкладывается в <option>: два sibling-узла селекта
     let html = b"<select id=\"s\"><option>one<option>two</select>";
     let mut p = StreamPipeline::new(Default::default());
     p.push(html).unwrap();
@@ -311,12 +304,10 @@ fn dom_sibling_rules_and_generations() {
     let ob = kids.next().expect("option b");
     assert_eq!(dom.parent(ob), Some(sel), "sibling rule: option closes option");
     assert_ne!(oa, ob);
-    // удаление с генерацией: старый NodeId инвалидируется
     let id = dom.node_id(oa);
     assert!(dom.is_valid(id));
     assert!(dom.remove_node(id));
     assert!(!dom.is_valid(id), "generation bump invalidates stale id");
-    // oa был родителем текста — текст удалился каскадно
     let first = dom.children(sel).next().expect("first child now");
     assert_ne!(first, oa);
 }

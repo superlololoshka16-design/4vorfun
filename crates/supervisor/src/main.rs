@@ -87,7 +87,7 @@ impl Engine {
             Ok(f) => {
                 self.stats.add_fetch(f.bytes_in);
                 render_page(out, &f.page);
-                if let Some(script) = f.page.challenge {
+                if let Some(script) = f.page.challenge.clone() {
                     self.stats.add_script();
                     let mut cookie_buf: SmallVec<[u8; 256]> = SmallVec::new();
                     session.jar.header_into(&mut cookie_buf);
@@ -101,6 +101,7 @@ impl Engine {
                         script,
                         snap,
                         timeout: self.timeout,
+                        doc: Some(Arc::clone(&f.page)),
                     };
                     let outcome = self.pool.exec(req).await;
                     self.stats.add_touches(outcome.touches);

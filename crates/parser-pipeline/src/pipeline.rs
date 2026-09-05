@@ -41,9 +41,6 @@ pub enum PipeError {
 type Sink = Box<dyn FnMut(&[u8]) + Send>;
 type Rewriter = lol_html::send::HtmlRewriter<'static, Sink>;
 
-/// Стрим-пайплайн: lol_html гонит поток, хендлеры кладут строки в арену
-/// скретча и эмитят спан-события, дренч — синхронно в конце каждого push().
-/// Каналов нет, клонов строк нет, аллокаций на событие нет.
 pub struct StreamPipeline {
     rewriter: Option<Rewriter>,
     collector: Collector,
@@ -57,7 +54,6 @@ impl StreamPipeline {
         Self::build(limits, &[])
     }
 
-    /// Полная сборка: базовые хендлеры + text-extraction по CSS-селекторам.
     pub fn with_selectors(limits: Limits, selectors: &[(String, String)]) -> Self {
         Self::build(limits, selectors)
     }
@@ -73,7 +69,6 @@ impl StreamPipeline {
                     .with_graceful_bail_out_on_memory_limit_exceeded(true),
             )
             .with_graceful_bail_out_on_content_handler_error(true)
-            // --- SoA-строитель: универсальный селектор, каждый элемент ---
             .append_element_content_handler(lol_html::element!("*", move |el: &mut Element<'_, '_>| {
                 let tag_name = el.tag_name();
                 let (tag, tag_dyn) = match crate::dom::TAGS.get(tag_name.as_str()) {
@@ -180,7 +175,6 @@ impl StreamPipeline {
                 scratch::emit(Ev::TitleText { span, last });
                 Ok(())
             }))
-            // --- Текст вне script/style: TEXT-узлы SoA-дерева ---
             .append_element_content_handler(lol_html::text!("*", move |t: &mut TextChunk<'_>| {
                 let span = scratch::push_str(t.as_str());
                 scratch::emit(Ev::DomText { span });

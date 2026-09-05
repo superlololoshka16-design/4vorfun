@@ -21,7 +21,6 @@ use crate::stats::StatsRef;
 
 pub type TaskId = u64;
 
-/// Железный контракт задачи: вся инфа в одном типе, маршрут по variant'у.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum TaskKind {
@@ -61,8 +60,6 @@ const ST_FAILED: u8 = 3;
 
 static NEXT_TASK: AtomicU64 = AtomicU64::new(1);
 
-/// Одна запись = state(атомик) + result(OnceLock).
-/// result пишется ровно один раз в конце воркера, читается клонированием Arc.
 struct TaskRec {
     submitted: Instant,
     deadline: Instant,
@@ -118,7 +115,6 @@ struct Job {
     kind: TaskKind,
 }
 
-/// Контекст исполнения: сети, профили, пул — воркер получает одним Arc.
 pub struct AppState {
     registry: Arc<HashMap<TaskId, Arc<TaskRec>>>,
     engines: Arc<EngineSet>,
@@ -193,7 +189,6 @@ impl AppState {
             }
         });
 
-        // VersionMonitor: фоновый лог актуальных хэшей билдов челленджей
         let mon = state.monitor.clone();
         tokio::spawn(async move {
             loop {
@@ -323,7 +318,6 @@ async fn submit_json(
         .await
         .map_err(|e| e.to_string())?;
     st.stats.add_fetch(f.bytes_in);
-    // собрать body из полей формы + кастомные fields + token
     let mut body: Vec<(String, String)> = Vec::with_capacity(8 + fields.len());
     for fm in &f.page.forms {
         for fd in &fm.fields {
@@ -358,7 +352,7 @@ async fn submit_json(
     let _ = p.push(&body_bytes).map_err(|e| e.to_string())?;
     let page = p.finish().map_err(|e| e.to_string())?;
     let mut v = serde_json::json!({ "statusCode": status, "htmlLen": body_bytes.len() });
-    if let Some(tok) = solve_challenge(st, &mut session, &Fetched { status, uri: compact_str::CompactString::from(url), page, bytes_in: body_bytes.len() as u64, elapsed_ms: 0 }).await {
+    if let Some(tok) = solve_challenge(st, &mut session, &Fetched { status, uri: compact_str::CompactString::from(url), page: Arc::new(page), bytes_in: body_bytes.len() as u64, elapsed_ms: 0 }).await {
         v["solvedToken"] = serde_json::Value::String(tok.to_string());
     }
     Ok(v)
@@ -415,6 +409,7 @@ async fn solve_json(
         script: bytes::Bytes::from(script.into_bytes()),
         snap: ProfileSnap::from_parts(&profile, "https://challenge.local/", ""),
         timeout,
+        doc: None,
     };
     let outcome = st.pool.exec(req).await;
     match outcome.token {
@@ -443,6 +438,7 @@ async fn solve_challenge(st: &AppState, session: &mut Session, f: &Fetched) -> O
         script,
         snap,
         timeout: st.timeout,
+        doc: Some(Arc::clone(&f.page)),
     };
     st.pool.exec(req).await.token
 }

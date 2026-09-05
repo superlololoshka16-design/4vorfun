@@ -23,14 +23,12 @@ impl FieldKind {
     }
 }
 
-/// Поле внутри формы — компактная версия для submit.
 pub struct FormData {
     pub name: CompactString,
     pub value: Option<CompactString>,
     pub kind: FieldKind,
 }
 
-/// Полное поле со структурными атрибутами — для Extract/анализа.
 pub struct FieldData {
     pub tag: CompactString,
     pub name: CompactString,
@@ -86,7 +84,6 @@ pub struct PageData {
     pub challenge: Option<Bytes>,
     pub challenge_markers: SmallVec<[(CompactString, ChallengeType); 4]>,
     pub challenge_script_url: Option<CompactString>,
-    /// Плоское SoA-дерево целевых узлов (scripts/forms/inputs/head/title).
     pub dom: DomTree,
     pub extracted: std::collections::BTreeMap<CompactString, CompactString>,
     pub next_data: Option<NextData>,

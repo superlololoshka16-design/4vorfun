@@ -4,6 +4,7 @@ use futures_util::StreamExt;
 use parser_pipeline::{Flow, PageData, StreamPipeline};
 use session_state::Session;
 use smallvec::SmallVec;
+use std::sync::Arc;
 use std::time::Instant;
 use thiserror::Error;
 use wreq::header::{HeaderMap, HeaderName, HeaderValue, SET_COOKIE};
@@ -23,7 +24,7 @@ pub enum NetError {
 pub struct Fetched {
     pub status: u16,
     pub uri: CompactString,
-    pub page: PageData,
+    pub page: Arc<PageData>,
     pub bytes_in: u64,
     pub elapsed_ms: u64,
 }
@@ -99,7 +100,7 @@ pub async fn fetch_page_sel(
     Ok(Fetched {
         status,
         uri,
-        page,
+        page: Arc::new(page),
         bytes_in,
         elapsed_ms: start.elapsed().as_millis() as u64,
     })

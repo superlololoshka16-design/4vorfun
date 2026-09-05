@@ -60,9 +60,6 @@ const TAG_TEMPLATE: u16 = 100;
 const ATTR_ID_ID: u16 = 17;
 const ATTR_CLASS_ID: u16 = 7;
 
-/// Таргетные теги: то, что реально читают скрипты защит (document.scripts,
-/// формы/токены, head, интерактив для координат event.target). Остальное
-/// мимо памяти.
 #[inline]
 fn is_target_tag(t: u16) -> bool {
     matches!(
@@ -74,12 +71,6 @@ fn is_target_tag(t: u16) -> bool {
     )
 }
 
-/// Состояние парсинга. Живёт внутри StreamPipeline, мутируется только
-/// из apply() — события прилетают синхронным дренчем скретча.
-///
-/// Помимо коллекций (формы/токены/скрипты/челлендж-маркеры) строит SoA
-/// DomTree с адаптивным фильтром: нецелевые теги без id/class/data-* не
-/// создают узлов вовсе — дерево держит десятки килобайт вместо мегабайт.
 pub struct Collector {
     limits: Limits,
     pub title: Option<CompactString>,
@@ -94,16 +85,13 @@ pub struct Collector {
     challenge: Option<Bytes>,
     pub challenge_markers: SmallVec<[(CompactString, crate::types::ChallengeType); 4]>,
     pub challenge_script_url: Option<CompactString>,
-    /// Ключи Extract-задач: интерн на сборке, события несут u32.
     extract_keys: Vec<CompactString>,
-    /// Накопленный текст по ключу селектора (id -> буфер).
     extracted_ids: std::collections::BTreeMap<u32, CompactString>,
     next_data: Option<NextData>,
     cur_script: Option<ScriptCapture>,
     parse_errors: u32,
     dom: DomTree,
     open: OpenStack,
-    /// Параллель стеку открытых: true = элемент отфильтрован, узла нет.
     skip: Vec<bool>,
     tag_intern: TagInterner,
     attr_intern: AttrNameInterner,
@@ -171,20 +159,16 @@ impl Collector {
         self.finalize_form();
     }
 
-    /// Текущий родитель для SoA-узлов: вершина стека открытых элементов.
     #[inline]
     fn dom_parent(&self) -> u32 {
         self.open.top().unwrap_or(u32::MAX)
     }
 
-    /// У узла есть маркер-атрибут (id/class) — потенциальный контейнер капчи.
     #[inline]
     fn dom_has_marker_attr(&self, node: u32) -> bool {
         self.dom.attr(node, ATTR_ID_ID).is_some() || self.dom.attr(node, ATTR_CLASS_ID).is_some()
     }
 
-    /// Применить событие из скретча. `pool` — арена строк текущего write(),
-    /// `attrs` — плоский вектор атрибутов; спаны события указывают в них.
     pub fn apply(&mut self, pool: &[u8], attrs: &[AttrEv], ev: Ev) {
         match ev {
             Ev::DomOpen { tag, tag_dyn, attr_start, attr_count } => {
@@ -241,7 +225,6 @@ impl Collector {
             Ev::DomText { span } => {
                 let Some(top) = self.open.top() else { return };
                 let t = self.dom.tag_id(top);
-                // текст скрипта живёт в ScriptText-канале, в DOM-пул не дублируем
                 if t == tags::SCRIPT {
                     return;
                 }
@@ -400,8 +383,6 @@ impl Collector {
         }
     }
 
-    /// Накопление текста по ключу селектора — с обрезкой по UTF-8 boundary.
-    /// Ключ — u32-интерн: entry без аллокации на событие.
     pub fn push_extract(&mut self, key: u32, text: &str, cap: usize) {
         let e = self.extracted_ids.entry(key).or_default();
         if e.len() >= cap {
@@ -453,7 +434,6 @@ impl Collector {
     }
 }
 
-/// Безопасная обрезка UTF-8 по границе символа — не ломает символы.
 pub fn floor_char_boundary(s: &str, limit: usize) -> usize {
     if s.len() <= limit {
         return s.len();
@@ -465,15 +445,12 @@ pub fn floor_char_boundary(s: &str, limit: usize) -> usize {
     i
 }
 
-/// Маркеры имён полей-токенов (CSRF и т.д.).
 const TOKEN_MARKERS: &[&str] = &[
     "csrf", "_token", "token", "xsrf", "authenticity", "x-csrf",
     "anticsrf", "anti-csrf", "requesttoken", "request-token",
     "__requestverificationtoken", "csrfmiddlewaretoken",
 ];
 
-/// ASCII case-insensitive contains без аллокации:
-/// было: name.to_ascii_lowercase() — String в куче на каждое поле.
 #[inline]
 fn ascii_ci_contains(hay: &str, needle: &str) -> bool {
     let h = hay.as_bytes();
@@ -492,7 +469,6 @@ fn ascii_ci_contains(hay: &str, needle: &str) -> bool {
     false
 }
 
-/// Проверка имени поля на признак токена (CSRF и т.д.) — ноль аллокаций.
 pub fn looks_like_token(name: &str) -> bool {
     TOKEN_MARKERS.iter().any(|needle| ascii_ci_contains(name, needle))
 }

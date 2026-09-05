@@ -145,7 +145,7 @@ async fn full_cycle_gate_page_to_token_to_submit() {
     assert_eq!(f.page.next_data.as_ref().unwrap().build_id, "e42");
     assert_eq!(session.jar.get("SID"), Some("E2X"));
 
-    let challenge: Bytes = f.page.challenge.expect("challenge captured");
+    let challenge: Bytes = f.page.challenge.clone().expect("challenge captured");
     let text = std::str::from_utf8(challenge.as_ref()).unwrap_or("");
     assert!(text.contains("gate:"));
 
@@ -169,6 +169,7 @@ async fn full_cycle_gate_page_to_token_to_submit() {
             script: challenge.clone(),
             snap,
             timeout: Duration::from_millis(500),
+            doc: Some(Arc::clone(&f.page)),
         })
         .await;
     let token = outcome.token.expect("gate token");
@@ -188,6 +189,7 @@ async fn full_cycle_gate_page_to_token_to_submit() {
             script: challenge.clone(),
             snap: ProfileSnap::from_parts(session.profile.as_ref(), f.uri.as_str(), ""),
             timeout: Duration::from_millis(500),
+            doc: Some(Arc::clone(&f.page)),
         })
         .await;
     assert_eq!(replay.path, runtime_exec::ExecPath::RawHit);

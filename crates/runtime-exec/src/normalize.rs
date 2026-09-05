@@ -12,7 +12,6 @@ use smallvec::SmallVec;
 use std::io::Write as _;
 use std::sync::Arc;
 
-// thread_local oxc::Allocator с reset() — без malloc/free на каждом normalize.
 thread_local! {
     static OXC_ALLOC: std::cell::RefCell<Allocator> = std::cell::RefCell::new(Allocator::new());
 }
@@ -144,8 +143,6 @@ fn canon_ident<'a, A: oxc_allocator::GetAllocator<'a>>(idx: u32, alloc: &A) -> I
 
 pub fn normalize(script: &[u8]) -> Result<Normalized, ()> {
     let text = core_utils::utf8::basic::from_utf8(script).map_err(|_| ())?;
-    // Thread-local oxc::Allocator: reset() на каждом вызове — без malloc/free.
-    // Lifetime результатов привязан к зоне видимости with().
     OXC_ALLOC.with(|cell| {
         let mut cell = cell.borrow_mut();
         let alloc: &mut Allocator = &mut cell;

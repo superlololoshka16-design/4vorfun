@@ -1,12 +1,16 @@
 use crate::click::ClickCursor;
-use crate::input::event::RawEvent;
+use crate::event::RawEvent;
 use crate::motion::MotionCursor;
 use crate::scroll::ScrollCursor;
+use crate::session::TabSession;
 use crate::typing::TypingCursor;
+use smallvec::SmallVec;
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI32, AtomicU32, Ordering};
+
+pub type TabEvents = SmallVec<[(TabId, RawEvent); 32]>;
 
 pub struct Calibration {
     strictness: u8,
@@ -55,6 +59,7 @@ pub enum TabInput {
     Scroll(ScrollCursor),
     Type(TypingCursor),
     Click(ClickCursor),
+    Session(TabSession),
 }
 
 impl TabInput {
@@ -65,6 +70,7 @@ impl TabInput {
             TabInput::Scroll(c) => c.next_due_us(),
             TabInput::Type(c) => c.next_due_us(),
             TabInput::Click(c) => c.next_due_us(),
+            TabInput::Session(s) => s.next_due_us(),
         }
     }
 
@@ -75,15 +81,38 @@ impl TabInput {
             TabInput::Scroll(c) => c.done(),
             TabInput::Type(c) => c.done(),
             TabInput::Click(c) => c.done(),
+            TabInput::Session(s) => s.finished(),
         }
     }
 
-    fn step(&mut self, now_us: u64) -> Option<RawEvent> {
+    fn step_into(&mut self, now_us: u64, tab: TabId, out: &mut TabEvents) {
         match self {
-            TabInput::Move(c) => c.step(now_us),
-            TabInput::Scroll(c) => c.step(now_us),
-            TabInput::Type(c) => c.step(now_us),
-            TabInput::Click(c) => c.step(now_us),
+            TabInput::Move(c) => {
+                if let Some(ev) = c.step(now_us) {
+                    out.push((tab, ev));
+                }
+            }
+            TabInput::Scroll(c) => {
+                if let Some(ev) = c.step(now_us) {
+                    out.push((tab, ev));
+                }
+            }
+            TabInput::Type(c) => {
+                if let Some(ev) = c.step(now_us) {
+                    out.push((tab, ev));
+                }
+            }
+            TabInput::Click(c) => {
+                if let Some(ev) = c.step(now_us) {
+                    out.push((tab, ev));
+                }
+            }
+            TabInput::Session(s) => {
+                let tick = s.advance(now_us);
+                for ev in tick.events {
+                    out.push((tab, ev));
+                }
+            }
         }
     }
 }
@@ -171,7 +200,7 @@ impl InputHub {
         u32::MAX - (slot.weight.saturating_add(trust_bonus)).min(u32::MAX - 1)
     }
 
-    pub fn tick(&mut self, now_us: u64, out: &mut smallvec::SmallVec<[(TabId, RawEvent); 32]>) {
+    pub fn tick(&mut self, now_us: u64, out: &mut TabEvents) {
         out.clear();
         while let Some(&Reverse((due, _, tab_idx))) = self.heap.peek() {
             if due > now_us {
@@ -185,32 +214,26 @@ impl InputHub {
             let Some(input) = self.tabs[i].input.as_mut() else {
                 continue;
             };
-            match input.step(now_us) {
-                Some(ev) => {
-                    out.push((TabId(tab_idx), ev));
-                    if !input.done() {
-                        let nd = input.next_due_us();
-                        let rank = self.tab_rank(i);
-                        self.heap.push(Reverse((nd, rank, tab_idx)));
-                    } else {
-                        self.tabs[i].input = None;
-                    }
-                }
-                None => {
-                    if input.done() {
-                        self.tabs[i].input = None;
-                    } else {
-                        let nd = input.next_due_us();
-                        let rank = self.tab_rank(i);
-                        self.heap.push(Reverse((nd, rank, tab_idx)));
-                    }
-                }
+            input.step_into(now_us, TabId(tab_idx), out);
+            if input.done() {
+                self.tabs[i].input = None;
+            } else {
+                let nd = input.next_due_us();
+                let rank = self.tab_rank(i);
+                self.heap.push(Reverse((nd, rank, tab_idx)));
             }
         }
     }
 
     pub fn live_tabs(&self) -> usize {
         self.tabs.iter().filter(|t| t.site != u32::MAX).count()
+    }
+
+    pub fn next_due_us(&self) -> u64 {
+        self.heap
+            .peek()
+            .map(|Reverse((due, _, _))| *due)
+            .unwrap_or(u64::MAX)
     }
 }
 

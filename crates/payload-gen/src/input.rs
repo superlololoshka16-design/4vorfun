@@ -40,7 +40,7 @@ pub use motion::MotionCursor;
 pub use perlin::Perlin2D;
 pub use persona::{Persona, ThrottledPersona};
 pub use prng::SplitMix64Rng;
-pub use scheduler::{Calibration, InputHub, TabId, TabInput};
+pub use scheduler::{Calibration, InputHub, TabEvents, TabId, TabInput};
 pub use session::{
     BATCH_CAP, BATCH_INTERVAL_US, TabPhase, TabSession, TabTick, TelemetryBatcher,
 };

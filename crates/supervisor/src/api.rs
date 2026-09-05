@@ -7,12 +7,9 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use net_client::{EngineSet, Fetched, fetch_page_sel, push_telemetry, reslot};
+use net_client::{EngineSet, Fetched, fetch_page_sel, reslot};
 use parser_pipeline::{StreamPipeline, validate_selectors};
 use core_utils::xxh3;
-use payload_gen::input::{
-    Persona, RawEvent, TabSession, TelemetryBatcher, BATCH_CAP, BATCH_INTERVAL_US, events_bytes,
-};
 use runtime_exec::{ExecReq, ProfileSnap, WorkerPool};
 use scc::HashMap;
 use serde::{Deserialize, Serialize};
@@ -20,7 +17,8 @@ use session_state::{Profile, Session};
 use smallvec::SmallVec;
 use tokio::sync::{Semaphore, mpsc};
 
-use crate::stats::StatsRef;
+use supervisor::fleet::{Fleet, FleetMsg, fleet_daemon};
+use supervisor::stats::StatsRef;
 
 pub type TaskId = u64;
 
@@ -129,6 +127,7 @@ pub struct AppState {
     tx: mpsc::Sender<Job>,
     sem: Arc<Semaphore>,
     monitor: Arc<parser_pipeline::VersionMonitor>,
+    fleet_tx: mpsc::Sender<FleetMsg>,
 }
 
 impl AppState {
@@ -145,6 +144,10 @@ impl AppState {
         let registry = Arc::new(HashMap::new());
         let (tx, rx) = mpsc::channel::<Job>(1024);
         let sem = Arc::new(Semaphore::new(workers.max(1)));
+        let (fleet_tx, fleet_rx) = mpsc::channel::<FleetMsg>(1024);
+        let fleet = Fleet::new(engines.clone());
+        let fleet_stats = stats.clone();
+        tokio::spawn(fleet_daemon(fleet, fleet_rx, fleet_stats));
         let state = Arc::new(Self {
             registry,
             engines,
@@ -156,6 +159,7 @@ impl AppState {
             tx,
             sem,
             monitor: Arc::new(monitor),
+            fleet_tx,
         });
 
         let st = state.clone();
@@ -264,109 +268,6 @@ fn profile_for(st: &AppState, url: &str) -> (usize, Arc<Profile>) {
     (slot, profile)
 }
 
-async fn fetch_json(st: &AppState, url: &str, selectors: &[(String, String)]) -> Result<serde_json::value::Value, String> {
-    let (slot, profile) = profile_for(st, url);
-    let mut session = Session::new(profile, url);
-    let f = fetch_page_sel(&st.engines, slot, &mut session, url, selectors)
-        .await
-        .map_err(|e| e.to_string())?;
-    st.stats.add_fetch(f.bytes_in);
-    let mut v = page_json(&f);
-    if let Some(tok) = solve_challenge(st, &mut session, &f).await {
-        v["solvedToken"] = serde_json::Value::String(tok.to_string());
-    }
-    if let Some(route) = f.page.telemetry_route.clone() {
-        let flow = telemetry_flow(st, slot, &mut session, &route).await;
-        v["telemetry"] = flow;
-    }
-    if let (Some(url), Some(script)) = (&f.page.challenge_script_url, &f.page.challenge) {
-        if st.monitor.check(url.as_str(), script) {
-            tracing::warn!(url = url.as_str(), "challenge build changed");
-        }
-    }
-    Ok(v)
-}
-
-const TELEMETRY_WINDOW_US: u64 = 25_000_000;
-const TELEMETRY_MAX_TICKS: u32 = 4_000;
-
-async fn telemetry_flow(
-    st: &AppState,
-    slot: usize,
-    session: &mut Session,
-    route: &parser_pipeline::TelemetryRoute,
-) -> serde_json::value::Value {
-    let persona = Persona::derive(session.profile.canvas_seed, session.id.as_raw());
-    let mut rng = payload_gen::input::SplitMix64Rng::new(session.profile.canvas_seed ^ 0x5E55_0000_0000_0111);
-    let vw = session.profile.screen_w.max(320) as f64;
-    let vh = session.profile.screen_h.max(240) as f64;
-    let from = (vw * (0.08 + rng.next_f64() * 0.1), vh * (0.1 + rng.next_f64() * 0.12));
-    let target = (vw * (0.45 + rng.next_f64() * 0.25), vh * (0.4 + rng.next_f64() * 0.25));
-    let mut tab = TabSession::start(persona, session.profile.canvas_seed, session.id.as_raw(), from, target, 30.0, None, 0, 0);
-    let mut batcher = TelemetryBatcher::new(BATCH_CAP, BATCH_INTERVAL_US);
-    let mut scratch: Vec<RawEvent> = Vec::with_capacity(BATCH_CAP + 32);
-    let mut now = 0u64;
-    let mut ticks = 0u32;
-    let mut batches = 0u32;
-    let mut events_total = 0u64;
-    let mut statuses: Vec<u16> = Vec::new();
-    batcher.begin(0);
-    while now < TELEMETRY_WINDOW_US && ticks < TELEMETRY_MAX_TICKS {
-        let tick = tab.advance(now);
-        now = tick.next_due_us.max(now + 1);
-        ticks += 1;
-        if tick.events.is_empty() {
-            if batcher.ready(now) && !scratch.is_empty() {
-                batches += 1;
-                let status = push_telemetry(&st.engines, slot, session, route, events_bytes(&scratch))
-                    .await
-                    .map(|s| s)
-                    .unwrap_or(0);
-                st.stats.add_touches(scratch.len() as u64);
-                statuses.push(status);
-                scratch.clear();
-                batcher.begin(now);
-            }
-            if tab.finished() {
-                break;
-            }
-            continue;
-        }
-        batcher.feed(tick.events.len());
-        events_total += tick.events.len() as u64;
-        scratch.extend_from_slice(&tick.events);
-        if batcher.ready(now) {
-            batches += 1;
-            let status = push_telemetry(&st.engines, slot, session, route, events_bytes(&scratch))
-                .await
-                .map(|s| s)
-                .unwrap_or(0);
-            st.stats.add_touches(scratch.len() as u64);
-            statuses.push(status);
-            scratch.clear();
-            batcher.begin(now);
-        }
-    }
-    if !scratch.is_empty() {
-        batches += 1;
-        let status = push_telemetry(&st.engines, slot, session, route, events_bytes(&scratch))
-            .await
-            .map(|s| s)
-            .unwrap_or(0);
-        st.stats.add_touches(scratch.len() as u64);
-        statuses.push(status);
-    }
-    serde_json::json!({
-        "provider": route.provider.as_str(),
-        "endpoint": route.endpoint.as_str(),
-        "transport": format!("{:?}", route.transport),
-        "batches": batches,
-        "events": events_total,
-        "statuses": statuses,
-        "lastPhase": format!("{:?}", tab.phase()),
-    })
-}
-
 fn page_json(f: &Fetched) -> serde_json::value::Value {
     serde_json::json!({
         "finalUrl": f.uri.as_str(),
@@ -389,6 +290,42 @@ fn page_json(f: &Fetched) -> serde_json::value::Value {
         "extracted": f.page.extracted,
         "elapsedMs": f.elapsed_ms,
     })
+}
+
+async fn fetch_json(st: &AppState, url: &str, selectors: &[(String, String)]) -> Result<serde_json::value::Value, String> {
+    let (slot, profile) = profile_for(st, url);
+    let mut session = Session::new(profile, url);
+    let f = fetch_page_sel(&st.engines, slot, &mut session, url, selectors)
+        .await
+        .map_err(|e| e.to_string())?;
+    st.stats.add_fetch(f.bytes_in);
+    let mut v = page_json(&f);
+    if let Some(tok) = solve_challenge(st, &mut session, &f).await {
+        v["solvedToken"] = serde_json::Value::String(tok.to_string());
+    }
+    if let Some(route) = f.page.telemetry_route.clone() {
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        let _ = st
+            .fleet_tx
+            .send(FleetMsg::Attach {
+                profile: Arc::clone(&session.profile),
+                origin: f.uri.as_str().to_string(),
+                cookies: session.jar.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+                route,
+                engine_slot: slot,
+                weight: 8,
+                reply: reply_tx,
+            })
+            .await;
+        let tab = reply_rx.await.unwrap_or(u32::MAX);
+        v["telemetry"] = serde_json::json!({ "attached": tab != u32::MAX, "tabId": tab });
+    }
+    if let (Some(url), Some(script)) = (&f.page.challenge_script_url, &f.page.challenge) {
+        if st.monitor.check(url.as_str(), script) {
+            tracing::warn!(url = url.as_str(), "challenge build changed");
+        }
+    }
+    Ok(v)
 }
 
 async fn submit_json(
@@ -546,7 +483,18 @@ pub fn router(state: Arc<AppState>) -> Router {
 }
 
 async fn stats_handler(State(s): State<Arc<AppState>>) -> Json<serde_json::value::Value> {
-    Json(s.stats())
+    let mut v = s.stats();
+    let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+    if s.fleet_tx.send(FleetMsg::Stats { reply: reply_tx }).await.is_ok() {
+        if let Ok(fleet) = reply_rx.await {
+            if let Some(obj) = fleet.as_object() {
+                for (k, val) in obj {
+                    v[k.as_str()] = val.clone();
+                }
+            }
+        }
+    }
+    Json(v)
 }
 
 async fn create_task(

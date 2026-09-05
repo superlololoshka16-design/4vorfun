@@ -38,6 +38,10 @@ impl CookieJar {
         self.map.get(name).map(|v| v.as_str())
     }
 
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.map.iter().map(|(k, v)| (k.as_str(), v.as_str()))
+    }
+
     pub fn header_into(&self, out: &mut SmallVec<[u8; 256]>) {
         for (i, (k, v)) in self.map.iter().enumerate() {
             if i > 0 {

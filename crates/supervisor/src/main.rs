@@ -1,5 +1,6 @@
 mod api;
-mod stats;
+
+
 
 use clap::{Parser, Subcommand};
 use compact_str::CompactString;
@@ -15,7 +16,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::Semaphore;
 
-use stats::{StatBlock, StatsRef, p50p99, render_rss};
+use supervisor::stats::{StatBlock, StatsRef, p50p99, render_rss};
 
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;

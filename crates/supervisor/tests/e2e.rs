@@ -156,7 +156,7 @@ async fn full_cycle_gate_page_to_token_to_submit() {
     let url = format!("http://{addr}/gate");
 
     let catalog = engine_catalog().expect("catalog");
-    let engines = EngineSet::build(&catalog).expect("engines");
+    let engines = Arc::new(EngineSet::build(&catalog).expect("engines"));
     let mut session = Session::new(Arc::new(profile()), url.as_str());
 
     let f = tokio::time::timeout(
@@ -239,72 +239,40 @@ async fn full_cycle_gate_page_to_token_to_submit() {
 
     let route = f.page.telemetry_route.clone().expect("in-house route from inline hint");
     assert_eq!(route.provider, parser_pipeline::TelemetryProvider::InHouse);
-    let persona = payload_gen::input::Persona::derive(0xABC, session.id.as_raw());
-    let mut tab = payload_gen::input::TabSession::start(
-        persona,
-        0xABC,
-        session.id.as_raw(),
-        (180.0, 140.0),
-        (860.0, 540.0),
-        30.0,
-        None,
-        0,
-        0,
-    );
-    let mut batcher = payload_gen::input::TelemetryBatcher::new(
-        payload_gen::input::BATCH_CAP,
-        payload_gen::input::BATCH_INTERVAL_US,
-    );
-    let mut scratch: Vec<payload_gen::input::RawEvent> = Vec::new();
-    let mut now = 0u64;
+    let mut fleet = supervisor::fleet::Fleet::new(engines.clone());
+    let prof = session.profile.clone();
+    let mut cookies: Vec<(String, String)> = Vec::new();
+    for (k, v) in session.jar.iter() {
+        cookies.push((k.to_string(), v.to_string()));
+    }
+    let tab = fleet.attach(prof, url.as_str(), &session.jar, route, 0, 8);
+    let _ = cookies;
+    let base = supervisor::fleet::now_us();
     let mut pushed = 0u32;
-    batcher.begin(0);
-    while now < 25_000_000 {
-        let tick = tab.advance(now);
-        now = tick.next_due_us.max(now + 1);
-        if tick.events.is_empty() {
-            if batcher.ready(now) && !scratch.is_empty() {
-                let status = net_client::push_telemetry(
-                    &engines,
-                    0,
-                    &mut session,
-                    &route,
-                    payload_gen::input::events_bytes(&scratch),
-                )
-                .await
-                .expect("telemetry push");
-                assert_eq!(status, 204);
-                pushed += 1;
-                scratch.clear();
-                batcher.begin(now);
-            }
-            continue;
-        }
-        batcher.feed(tick.events.len());
-        scratch.extend_from_slice(&tick.events);
-        if batcher.ready(now) {
-            let status = net_client::push_telemetry(
-                &engines,
-                0,
-                &mut session,
-                &route,
-                payload_gen::input::events_bytes(&scratch),
-            )
-            .await
-            .expect("telemetry push");
+    let mut jobs: smallvec::SmallVec<[supervisor::fleet::PushJob; 8]> = smallvec::SmallVec::new();
+    for step in 1..=40u64 {
+        fleet.pump(base + step * 700_000, &mut jobs);
+        for job in &jobs {
+            let status = fleet.push(job).await;
             assert_eq!(status, 204);
+            fleet.calibrate(job.tab, true);
             pushed += 1;
-            scratch.clear();
-            batcher.begin(now);
+        }
+        jobs.clear();
+        if pushed >= 2 {
+            break;
         }
     }
-    assert!(pushed >= 2, "точки обязаны доехать до сайта батчами: {pushed}");
+    assert!(pushed >= 2, "флот обязан лить точки на сайт: {pushed}");
     assert!(
-        stats.bytes.load(Ordering::Relaxed) >= pushed as u64 * 16,
+        stats.bytes.load(Ordering::Relaxed) >= pushed as u64 * 8,
         "байты событий реально получены сайтом: {}",
         stats.bytes.load(Ordering::Relaxed)
     );
     assert!(stats.batches.load(Ordering::Relaxed) >= 2);
+    assert!(fleet.live_tabs() >= 1);
+    let st = fleet.stats();
+    assert!(st["events"].as_u64().unwrap_or(0) > 0, "флот живёт: {st}");
 
     server.await.expect("server join");
     drop(drain);

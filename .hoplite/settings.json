@@ -1,0 +1,26 @@
+{
+	"version": 1,
+	"ports": {
+		"preview": 3000,
+		"additional": {}
+	},
+	"scripts": {
+		"setup": {
+			"enabled": true,
+			"command": "mise use -g rust@1.98.1 && (command -v cmake >/dev/null || pip3 install --break-system-packages cmake) && ([ -f /usr/local/lib/libclang.so ] || { pip3 install --break-system-packages libclang; ln -sf \"$(find /usr/local/lib/python3* -name libclang.so | head -1)\" /usr/local/lib/libclang.so; })"
+		},
+		"run": {
+			"enabled": true,
+			"command": null
+		},
+		"archive": {
+			"enabled": true,
+			"command": null
+		},
+		"check": {
+			"enabled": true,
+			"command": null
+		}
+	},
+	"mcpServers": []
+}

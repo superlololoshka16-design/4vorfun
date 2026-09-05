@@ -1,0 +1,38 @@
+[package]
+name = "runtime-exec"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+wasmtime = { workspace = true }
+rquickjs = { workspace = true }
+oxc_allocator = { workspace = true }
+oxc_parser = { workspace = true }
+oxc_span = { workspace = true }
+oxc_ast = { workspace = true }
+oxc_traverse = { workspace = true }
+oxc_semantic = { workspace = true }
+oxc_codegen = { workspace = true }
+memmap2 = { workspace = true }
+crossbeam-channel = { workspace = true }
+scc = { workspace = true }
+tokio = { workspace = true }
+compact_str = { workspace = true }
+smallvec = { workspace = true }
+bytes = { workspace = true }
+twox-hash = { workspace = true }
+simdutf8 = { workspace = true }
+hex = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+core_affinity = { workspace = true }
+bumpalo = { workspace = true }
+session-state = { workspace = true }
+payload-gen = { workspace = true }
+parser-pipeline = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+crossbeam-channel = { workspace = true }
+bytes = { workspace = true }

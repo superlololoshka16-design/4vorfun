@@ -1,0 +1,9 @@
+[build]
+rustflags = ["-C", "target-cpu=native"]
+
+[env]
+# LIBCLANG_PATH — не хардкодим, система находит сама.
+# Если не находит: export LIBCLANG_PATH=/path/to/libclang.so (Linux)
+# или set LIBCLANG_PATH=C:\llvm\lib (Windows).
+LIBCLANG_PATH = "/usr/local/lib"
+BINDGEN_EXTRA_CLANG_ARGS = "-I/usr/lib/gcc/x86_64-linux-gnu/13/include -I/usr/lib/gcc/x86_64-linux-gnu/14/include -I/usr/include -I/usr/include/x86_64-linux-gnu"
